@@ -1,73 +1,46 @@
-import mockProducts from '@/src/app/(app)/(public)/data/products';
+import { productsApi } from '@/src/lib/api';
 import type { Product, ProductCreateInput } from '@/src/types';
 
-const STORAGE_KEY = 'vestro_products';
-
-function readProducts(): Product[] {
-    if (typeof window === 'undefined') return mockProducts;
-
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(mockProducts));
-        return mockProducts;
-    }
-
-    try {
-        return JSON.parse(stored) as Product[];
-    } catch {
-        return mockProducts;
-    }
-}
-
-function writeProducts(products: Product[]) {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+function normalize(product: Product): Product {
+    return {
+        ...product,
+        description: product.description ?? '',
+        image_url: product.image_url ?? '',
+    };
 }
 
 export async function getProducts(): Promise<Product[]> {
-    return readProducts();
+    const products = await productsApi.list();
+    return products.map(normalize);
 }
 
 export async function getFeaturedProducts(limit = 4): Promise<Product[]> {
-    return readProducts().slice(0, limit);
+    const products = await productsApi.list({ featured: true, limit });
+    return products.map(normalize);
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
-    return readProducts().find((product) => product.id === id) ?? null;
+    try {
+        return normalize(await productsApi.get(id));
+    } catch {
+        return null;
+    }
 }
 
 export async function getCategories(): Promise<string[]> {
-    return Array.from(new Set(readProducts().map((product) => product.category)));
+    return productsApi.categories();
 }
 
-export function createProduct(input: ProductCreateInput): Product {
-    const now = new Date().toISOString();
-    const product: Product = {
-        ...input,
-        id: `product-${Date.now().toString(36)}`,
-        is_active: input.is_active ?? true,
-        created_at: now,
-        updated_at: now,
-    };
-
-    writeProducts([product, ...readProducts()]);
-    return product;
+export async function createProduct(input: ProductCreateInput): Promise<Product> {
+    return normalize(await productsApi.create(input));
 }
 
-export function updateProduct(id: string, input: Partial<ProductCreateInput>): Product | null {
-    const products = readProducts();
-    const index = products.findIndex((p) => p.id === id);
-    if (index === -1) return null;
-
-    const updated: Product = { ...products[index], ...input, updated_at: new Date().toISOString() };
-    const next = [...products];
-    next[index] = updated;
-    writeProducts(next);
-    return updated;
+export async function updateProduct(id: string, input: Partial<ProductCreateInput>): Promise<Product> {
+    return normalize(await productsApi.update(id, input));
 }
 
-export function deleteProduct(id: string) {
-    writeProducts(readProducts().filter((p) => p.id !== id));
+export async function deleteProduct(id: string): Promise<void> {
+    await productsApi.remove(id);
 }
 
 const productData = {

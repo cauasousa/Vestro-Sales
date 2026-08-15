@@ -20,12 +20,20 @@ export default function AdminProductsPage() {
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState(emptyForm);
+    const [error, setError] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
 
     const loadProducts = async () => {
         setLoading(true);
-        const data = await getProducts();
-        setProducts([...data].sort((a, b) => b.created_at.localeCompare(a.created_at)));
-        setLoading(false);
+        try {
+            const data = await getProducts();
+            setProducts([...data].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+            setError(null);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to load products');
+        } finally {
+            setLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -36,6 +44,7 @@ export default function AdminProductsPage() {
     const openCreate = () => {
         setEditingId(null);
         setForm(emptyForm);
+        setError(null);
         setShowForm(true);
     };
 
@@ -49,11 +58,14 @@ export default function AdminProductsPage() {
             stock: String(p.stock),
             image_url: p.image_url || '',
         });
+        setError(null);
         setShowForm(true);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setSaving(true);
+        setError(null);
 
         const payload = {
             name: form.name,
@@ -64,20 +76,29 @@ export default function AdminProductsPage() {
             image_url: form.image_url,
         };
 
-        if (editingId) {
-            updateProduct(editingId, payload);
-        } else {
-            createProduct(payload);
+        try {
+            if (editingId) {
+                await updateProduct(editingId, payload);
+            } else {
+                await createProduct(payload);
+            }
+            setShowForm(false);
+            await loadProducts();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to save product');
+        } finally {
+            setSaving(false);
         }
-
-        setShowForm(false);
-        loadProducts();
     };
 
-    const handleDelete = (id: string) => {
+    const handleDelete = async (id: string) => {
         if (!confirm('Delete this product?')) return;
-        deleteProduct(id);
-        loadProducts();
+        try {
+            await deleteProduct(id);
+            await loadProducts();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to delete product');
+        }
     };
 
     return (
@@ -95,6 +116,8 @@ export default function AdminProductsPage() {
                     New product
                 </button>
             </div>
+
+            {error && !showForm && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white">
                 <table className="w-full text-left text-sm">
@@ -198,6 +221,8 @@ export default function AdminProductsPage() {
                                         <option value="accessories">Accessories</option>
                                         <option value="audio">Audio</option>
                                         <option value="desk">Desk</option>
+                                        <option value="mobile">Mobile</option>
+                                        <option value="network">Network</option>
                                         <option value="work">Work</option>
                                     </select>
                                 </div>
@@ -238,12 +263,18 @@ export default function AdminProductsPage() {
                             </div>
                         </div>
 
+                        {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+
                         <div className="mt-6 flex justify-end gap-3">
                             <button type="button" onClick={() => setShowForm(false)} className="rounded-full border border-black/10 px-4 py-2 text-sm">
                                 Cancel
                             </button>
-                            <button type="submit" className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper">
-                                {editingId ? 'Save changes' : 'Create product'}
+                            <button
+                                type="submit"
+                                disabled={saving}
+                                className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper disabled:opacity-50"
+                            >
+                                {saving ? 'Saving…' : editingId ? 'Save changes' : 'Create product'}
                             </button>
                         </div>
                     </form>

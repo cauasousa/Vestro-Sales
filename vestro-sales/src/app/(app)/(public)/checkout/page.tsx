@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/src/components/Navbar';
 import { useCart } from '@/src/hooks/useCart';
-import { createOrder } from '@/src/lib/orders';
+import { ordersApi } from '@/src/lib/api';
 
 const emptyForm = {
     fullName: '',
@@ -23,21 +23,31 @@ export default function CheckoutPage() {
     const { items, subtotal, clearCart } = useCart();
     const [form, setForm] = useState(emptyForm);
     const [placing, setPlacing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setError(null);
         setPlacing(true);
 
-        const order = createOrder(items, {
-            fullName: form.fullName,
-            email: form.email,
-            address: form.address,
-            city: form.city,
-            postalCode: form.postalCode,
-        });
+        try {
+            const order = await ordersApi.place({
+                items,
+                customer: {
+                    fullName: form.fullName,
+                    email: form.email,
+                    address: form.address,
+                    city: form.city,
+                    postalCode: form.postalCode,
+                },
+            });
 
-        clearCart();
-        router.push(`/checkout/success?order=${order.id}`);
+            clearCart();
+            router.push(`/checkout/success?order=${order.id}`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Could not place order');
+            setPlacing(false);
+        }
     };
 
     if (items.length === 0) {
@@ -176,6 +186,8 @@ export default function CheckoutPage() {
                             <span>Total</span>
                             <span>${subtotal.toFixed(2)}</span>
                         </div>
+
+                        {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
                         <button
                             type="submit"

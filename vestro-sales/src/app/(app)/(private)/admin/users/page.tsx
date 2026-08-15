@@ -2,23 +2,34 @@
 
 import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import { createUser, getUsers } from '@/src/lib/user-store';
-import type { Role, User } from '@/src/types';
+import { usersApi } from '@/src/lib/api';
+import type { Profile, Role } from '@/src/lib/types';
 
 const emptyForm = {
     full_name: '',
     email: '',
     password: '',
-    role: 'client' as Role,
+    role: 'customer' as Role,
 };
 
 export default function AdminUsersPage() {
-    const [users, setUsers] = useState<User[]>([]);
+    const [users, setUsers] = useState<Profile[]>([]);
+    const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [form, setForm] = useState(emptyForm);
     const [error, setError] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
 
-    const loadUsers = () => setUsers(getUsers());
+    const loadUsers = async () => {
+        setLoading(true);
+        try {
+            setUsers(await usersApi.list());
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to load users');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
         loadUsers();
@@ -30,16 +41,19 @@ export default function AdminUsersPage() {
         setShowForm(true);
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
+        setSaving(true);
 
         try {
-            createUser(form);
+            await usersApi.create(form);
             setShowForm(false);
-            loadUsers();
+            await loadUsers();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not create user');
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -48,7 +62,7 @@ export default function AdminUsersPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-display text-2xl font-semibold">Users</h1>
-                    <p className="mt-1 text-sm text-ink/60">Manage clients and managers.</p>
+                    <p className="mt-1 text-sm text-ink/60">Manage customers and admins.</p>
                 </div>
                 <button
                     onClick={openCreate}
@@ -58,6 +72,8 @@ export default function AdminUsersPage() {
                     New user
                 </button>
             </div>
+
+            {error && !showForm && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white">
                 <table className="w-full text-left text-sm">
@@ -69,7 +85,13 @@ export default function AdminUsersPage() {
                         </tr>
                     </thead>
                     <tbody>
-                        {users.length === 0 ? (
+                        {loading ? (
+                            <tr>
+                                <td colSpan={3} className="px-4 py-8 text-center text-ink/50">
+                                    Loading users…
+                                </td>
+                            </tr>
+                        ) : users.length === 0 ? (
                             <tr>
                                 <td colSpan={3} className="px-4 py-8 text-center text-ink/50">
                                     No users yet.
@@ -82,7 +104,7 @@ export default function AdminUsersPage() {
                                     <td className="px-4 py-3 text-ink/60">{u.email}</td>
                                     <td className="px-4 py-3">
                                         <span
-                                            className={`rounded-full px-2.5 py-1 text-xs capitalize ${u.role === 'manager'
+                                            className={`rounded-full px-2.5 py-1 text-xs capitalize ${u.role === 'admin'
                                                 ? 'bg-ink text-paper'
                                                 : 'bg-black/5 text-ink/70'
                                                 }`}
@@ -148,8 +170,8 @@ export default function AdminUsersPage() {
                                     onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
                                     className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent"
                                 >
-                                    <option value="client">Client</option>
-                                    <option value="manager">Manager</option>
+                                    <option value="customer">Customer</option>
+                                    <option value="admin">Admin</option>
                                 </select>
                             </div>
                         </div>
@@ -160,8 +182,12 @@ export default function AdminUsersPage() {
                             <button type="button" onClick={() => setShowForm(false)} className="rounded-full border border-black/10 px-4 py-2 text-sm">
                                 Cancel
                             </button>
-                            <button type="submit" className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper">
-                                Create user
+                            <button
+                                type="submit"
+                                disabled={saving}
+                                className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper disabled:opacity-50"
+                            >
+                                {saving ? 'Creating…' : 'Create user'}
                             </button>
                         </div>
                     </form>

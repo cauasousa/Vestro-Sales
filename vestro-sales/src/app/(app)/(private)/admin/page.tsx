@@ -1,35 +1,34 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { DollarSign, Percent, TrendingUp, Users, UserCircle } from 'lucide-react';
 import SalesChart from '@/src/components/SalesChart';
-import { mockMetrics, mockSalesData } from '@/src/lib/mock-admin';
-import { getUsers } from '@/src/lib/user-store';
+import { api, metricsApi, type MetricsSummary } from '@/src/lib/api';
 import type { SalesForecastPoint } from '@/src/lib/types';
 
-type Metrics = {
-    revenue: number;
-    newCustomers: number;
-    conversionRate: number;
-    ordersCount: number;
-};
-
 export default function AdminDashboardPage() {
-    const [metrics, setMetrics] = useState<Metrics | null>(null);
+    const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
     const [history, setHistory] = useState<SalesForecastPoint[]>([]);
     const [forecast, setForecast] = useState<SalesForecastPoint[]>([]);
-    const [totalUsers, setTotalUsers] = useState<number | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Mock data load
-        setMetrics(mockMetrics);
-        setTotalUsers(getUsers().length);
+        let active = true;
 
-        const historical = mockSalesData.filter((d) => d.actual !== null);
-        const forecasted = mockSalesData.filter((d) => d.predicted !== null);
+        Promise.all([metricsApi.summary(), api.getSalesForecast()])
+            .then(([summary, sales]) => {
+                if (!active) return;
+                setMetrics(summary);
+                setHistory(sales.history);
+                setForecast(sales.forecast);
+            })
+            .catch((err) => {
+                if (active) setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+            });
 
-        setHistory(historical as SalesForecastPoint[]);
-        setForecast(forecasted as SalesForecastPoint[]);
+        return () => {
+            active = false;
+        };
     }, []);
 
     const cards = [
@@ -37,13 +36,15 @@ export default function AdminDashboardPage() {
         { label: 'New customers', value: metrics ? metrics.newCustomers : '—', icon: Users },
         { label: 'Conversion rate', value: metrics ? `${metrics.conversionRate}%` : '—', icon: Percent },
         { label: 'Orders (7 days)', value: metrics ? metrics.ordersCount : '—', icon: TrendingUp },
-        { label: 'Total users', value: totalUsers ?? '—', icon: UserCircle },
+        { label: 'Total users', value: metrics ? metrics.totalUsers : '—', icon: UserCircle },
     ];
 
     return (
         <div className="max-w-6xl">
             <h1 className="font-display text-2xl font-semibold">General metrics</h1>
-            <p className="mt-1 text-sm text-ink/60">Last 7 days, mock data for MVP.</p>
+            <p className="mt-1 text-sm text-ink/60">Last 7 days.</p>
+
+            {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-5">
                 {cards.map((c) => (

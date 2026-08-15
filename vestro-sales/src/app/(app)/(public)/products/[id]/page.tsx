@@ -11,7 +11,7 @@ import { useProducts } from '@/src/hooks/useProducts';
 
 export default function ProductDetailPage() {
     const { id } = useParams<{ id: string }>();
-    const { allProducts, loading } = useProducts();
+    const { allProducts, loading, error } = useProducts();
 
     const product = allProducts.find((p) => p.id === id) ?? null;
 
@@ -21,6 +21,23 @@ export default function ProductDetailPage() {
                 <Navbar />
                 <section className="container-page py-24 text-center">
                     <p className="text-sm text-ink/50">Loading product…</p>
+                </section>
+            </>
+        );
+    }
+
+    if (error) {
+        return (
+            <>
+                <Navbar />
+                <section className="container-page py-24 text-center">
+                    <p className="text-sm text-red-500">Couldn&apos;t load this product: {error}</p>
+                    <Link
+                        href="/products"
+                        className="mt-6 inline-block rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition hover:bg-ink/85"
+                    >
+                        Back to shop
+                    </Link>
                 </section>
             </>
         );

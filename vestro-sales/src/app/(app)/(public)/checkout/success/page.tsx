@@ -1,27 +1,45 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { CheckCircle2 } from 'lucide-react';
 import Navbar from '@/src/components/Navbar';
-import { getLastOrder } from '@/src/lib/orders';
+import { ordersApi } from '@/src/lib/api';
 import type { Order } from '@/src/types';
 
 export default function CheckoutSuccessPage() {
+    return (
+        <Suspense fallback={<Navbar />}>
+            <CheckoutSuccessContent />
+        </Suspense>
+    );
+}
+
+function CheckoutSuccessContent() {
+    const searchParams = useSearchParams();
+    const orderId = searchParams.get('order');
     const [order, setOrder] = useState<Order | null>(null);
-    const [checked, setChecked] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        setOrder(getLastOrder());
-        setChecked(true);
-    }, []);
+        if (!orderId) {
+            setError('No order id provided.');
+            return;
+        }
 
-    if (checked && !order) {
+        ordersApi
+            .get(orderId)
+            .then(setOrder)
+            .catch((err) => setError(err instanceof Error ? err.message : 'Order not found'));
+    }, [orderId]);
+
+    if (error) {
         return (
             <>
                 <Navbar />
                 <section className="container-page py-24 text-center">
-                    <p className="text-sm text-ink/50">No recent order found.</p>
+                    <p className="text-sm text-ink/50">{error}</p>
                     <Link
                         href="/products"
                         className="mt-6 inline-block rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition hover:bg-ink/85"
@@ -50,15 +68,20 @@ export default function CheckoutSuccessPage() {
                 <h1 className="mt-4 font-display text-3xl font-semibold">Order confirmed</h1>
                 <p className="mt-2 text-sm text-ink/60">
                     Thanks, {order.customer.fullName.split(' ')[0] || 'there'} — your order{' '}
-                    <span className="font-medium text-ink">#{order.id}</span> has been placed.
+                    <span className="font-medium text-ink">#{order.id.slice(0, 8)}</span> has been placed.
                 </p>
 
                 <div className="mt-10 w-full max-w-md rounded-2xl border border-black/5 bg-white p-6 text-left">
                     <h2 className="font-display text-lg font-semibold">Order summary</h2>
                     <div className="mt-4 space-y-3">
                         {order.items.map((item) => (
-                            <div key={item.productId} className="flex items-center justify-between text-sm">
-                                <span className="text-ink/70">
+                            <div key={item.productId} className="flex items-center gap-3 text-sm">
+                                <div className="h-11 w-11 flex-shrink-0 overflow-hidden rounded-lg bg-ink/5">
+                                    {item.image_url && (
+                                        <img src={item.image_url} alt={item.name} className="h-full w-full object-cover" />
+                                    )}
+                                </div>
+                                <span className="flex-1 text-ink/70">
                                     {item.name} <span className="text-ink/40">× {item.quantity}</span>
                                 </span>
                                 <span className="font-medium">${(item.price * item.quantity).toFixed(2)}</span>
@@ -79,12 +102,22 @@ export default function CheckoutSuccessPage() {
                     </div>
                 </div>
 
-                <Link
-                    href="/products"
-                    className="mt-8 rounded-full bg-ink px-6 py-3 text-sm font-medium text-paper transition hover:bg-ink/85"
-                >
-                    Continue shopping
-                </Link>
+                <div className="mt-8 flex gap-3">
+                    <Link
+                        href="/products"
+                        className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-paper transition hover:bg-ink/85"
+                    >
+                        Continue shopping
+                    </Link>
+                    {order.customerId && (
+                        <Link
+                            href="/orders"
+                            className="rounded-full border border-black/10 px-6 py-3 text-sm text-ink/70 transition hover:border-black/30"
+                        >
+                            View my orders
+                        </Link>
+                    )}
+                </div>
             </section>
         </>
     );

@@ -1,11 +1,8 @@
-export type Role = 'manager' | 'client';
+export type Role = 'admin' | 'customer';
 
-export type User = {
-    id: string;
+export type UserCreateInput = {
     full_name: string;
     email: string;
     password: string;
     role: Role;
 };
-
-export type UserCreateInput = Omit<User, 'id'>;

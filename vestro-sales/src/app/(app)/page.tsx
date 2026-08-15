@@ -11,7 +11,7 @@ import { Reveal, RevealContainer, RevealItem } from '@/src/components/Reveal';
 import { useProducts } from '@/src/hooks/useProducts';
 
 export default function LandingPage() {
-    const { products } = useProducts({ featured: true });
+    const { products, error } = useProducts({ featured: true });
 
     return (
         <>
@@ -32,7 +32,13 @@ export default function LandingPage() {
                     </div>
                 </Reveal>
 
-                {products.length === 0 ? (
+                {error ? (
+                    <Reveal>
+                        <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                            Couldn&apos;t load featured products: {error}
+                        </p>
+                    </Reveal>
+                ) : products.length === 0 ? (
                     <Reveal>
                         <p className="text-sm text-ink/50">No products yet — add some from the admin dashboard.</p>
                     </Reveal>

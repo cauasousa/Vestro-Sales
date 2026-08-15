@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, Send } from 'lucide-react';
 import { api } from '@/src/lib/api';
-import { getFallbackAnswer } from '@/src/lib/assistant-fallback';
 
 type Message = {
     id: string;
@@ -36,8 +35,8 @@ export default function AiAssistantPage() {
         try {
             const res = await api.askAssistant(prompt.trim());
             answer = res.answer;
-        } catch {
-            answer = await getFallbackAnswer(prompt.trim());
+        } catch (err) {
+            answer = err instanceof Error ? `Sorry, something went wrong: ${err.message}` : 'Sorry, something went wrong.';
         }
 
         setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: answer }]);

@@ -1,13 +1,11 @@
 -- ============================================================
--- Minimal Tech Store - Supabase schema
--- Run this in the Supabase SQL Editor (Project > SQL Editor)
+-- Vestro Sales - Supabase schema (v2)
 -- ============================================================
 
--- Extensions
 create extension if not exists "uuid-ossp";
 
 -- ------------------------------------------------------------
--- PROFILES (extends Supabase auth.users with a role)
+-- PROFILES
 -- ------------------------------------------------------------
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -17,7 +15,6 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
--- Automatically create a profile row whenever a new auth user signs up
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -39,7 +36,8 @@ create table if not exists public.products (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
   description text,
-  category text not null default 'accessories',
+  category text not null default 'accessories'
+    check (category in ('accessories', 'audio', 'desk', 'mobile', 'network', 'work')),
   price numeric(10, 2) not null check (price >= 0),
   stock integer not null default 0 check (stock >= 0),
   image_url text,
@@ -48,34 +46,6 @@ create table if not exists public.products (
   updated_at timestamptz not null default now()
 );
 
--- ------------------------------------------------------------
--- SALES (feeds the predictive dashboard chart)
--- ------------------------------------------------------------
-create table if not exists public.sales (
-  id uuid primary key default uuid_generate_v4(),
-  product_id uuid references public.products(id) on delete set null,
-  customer_id uuid references public.profiles(id) on delete set null,
-  quantity integer not null check (quantity > 0),
-  total_amount numeric(10, 2) not null check (total_amount >= 0),
-  created_at timestamptz not null default now()
-);
-
-create index if not exists idx_sales_created_at on public.sales (created_at);
-
--- ------------------------------------------------------------
--- CHAT MESSAGES (customer support / AI assistant log)
--- ------------------------------------------------------------
-create table if not exists public.chat_messages (
-  id uuid primary key default uuid_generate_v4(),
-  user_id uuid references public.profiles(id) on delete cascade,
-  message text not null,
-  ai_response text,
-  created_at timestamptz not null default now()
-);
-
--- ------------------------------------------------------------
--- updated_at trigger for products
--- ------------------------------------------------------------
 create or replace function public.set_updated_at()
 returns trigger as $$
 begin
@@ -90,14 +60,113 @@ create trigger trg_products_updated_at
   for each row execute procedure public.set_updated_at();
 
 -- ------------------------------------------------------------
+-- ORDERS
+-- ------------------------------------------------------------
+create table if not exists public.orders (
+  id uuid primary key default uuid_generate_v4(),
+  customer_id uuid references public.profiles(id) on delete set null,
+  full_name text not null,
+  email text not null,
+  address text not null,
+  city text not null,
+  postal_code text not null,
+  subtotal numeric(10, 2) not null check (subtotal >= 0),
+  status text not null default 'placed'
+    check (status in ('placed', 'paid', 'shipped', 'delivered', 'cancelled')),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.order_items (
+  id uuid primary key default uuid_generate_v4(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  product_id uuid references public.products(id) on delete set null,
+  name text not null,
+  price numeric(10, 2) not null check (price >= 0),
+  quantity integer not null check (quantity > 0),
+  image_url text
+);
+
+create index if not exists idx_order_items_order_id on public.order_items (order_id);
+
+-- ------------------------------------------------------------
+-- SALES (derived ledger, feeds the forecast chart)
+-- ------------------------------------------------------------
+create table if not exists public.sales (
+  id uuid primary key default uuid_generate_v4(),
+  order_id uuid references public.orders(id) on delete cascade,
+  product_id uuid references public.products(id) on delete set null,
+  customer_id uuid references public.profiles(id) on delete set null,
+  quantity integer not null check (quantity > 0),
+  total_amount numeric(10, 2) not null check (total_amount >= 0),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_sales_created_at on public.sales (created_at);
+
+-- auto-populate sales whenever an order_item is inserted
+create or replace function public.record_sale_from_order_item()
+returns trigger as $$
+declare
+  v_customer_id uuid;
+  v_created_at timestamptz;
+begin
+  select customer_id, created_at into v_customer_id, v_created_at
+  from public.orders where id = new.order_id;
+
+  insert into public.sales (order_id, product_id, customer_id, quantity, total_amount, created_at)
+  values (new.order_id, new.product_id, v_customer_id, new.quantity, new.price * new.quantity, v_created_at);
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_order_item_to_sale on public.order_items;
+create trigger trg_order_item_to_sale
+  after insert on public.order_items
+  for each row execute procedure public.record_sale_from_order_item();
+
+-- ------------------------------------------------------------
+-- CHAT (support conversations)
+-- ------------------------------------------------------------
+create table if not exists public.conversations (
+  id uuid primary key default uuid_generate_v4(),
+  customer_id uuid references public.profiles(id) on delete cascade,
+  customer_name text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.chat_messages (
+  id uuid primary key default uuid_generate_v4(),
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  sender text not null check (sender in ('admin', 'customer')),
+  text text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_chat_messages_conversation_id on public.chat_messages (conversation_id);
+
+-- ------------------------------------------------------------
+-- NEWSLETTER
+-- ------------------------------------------------------------
+create table if not exists public.newsletter_subscribers (
+  id uuid primary key default uuid_generate_v4(),
+  email text not null unique,
+  subscribed_at timestamptz not null default now(),
+  unsubscribed_at timestamptz
+);
+
+-- ------------------------------------------------------------
 -- ROW LEVEL SECURITY
 -- ------------------------------------------------------------
 alter table public.profiles enable row level security;
 alter table public.products enable row level security;
+alter table public.orders enable row level security;
+alter table public.order_items enable row level security;
 alter table public.sales enable row level security;
+alter table public.conversations enable row level security;
 alter table public.chat_messages enable row level security;
+alter table public.newsletter_subscribers enable row level security;
 
--- Helper: is the current user an admin?
 create or replace function public.is_admin()
 returns boolean as $$
   select exists (
@@ -106,13 +175,13 @@ returns boolean as $$
   );
 $$ language sql security definer stable;
 
--- Profiles: users can read/update their own profile; admins can read all
+-- Profiles
 create policy "profiles_select_own_or_admin" on public.profiles
   for select using (auth.uid() = id or public.is_admin());
 create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id);
 
--- Products: anyone (incl. anonymous) can read active products; only admins can write
+-- Products
 create policy "products_public_read" on public.products
   for select using (is_active = true or public.is_admin());
 create policy "products_admin_write" on public.products
@@ -122,22 +191,64 @@ create policy "products_admin_update" on public.products
 create policy "products_admin_delete" on public.products
   for delete using (public.is_admin());
 
--- Sales: customers can insert/read their own sales; admins can read/write all
-create policy "sales_customer_insert" on public.sales
-  for insert with check (auth.uid() = customer_id or public.is_admin());
-create policy "sales_read_own_or_admin" on public.sales
-  for select using (auth.uid() = customer_id or public.is_admin());
-create policy "sales_admin_write" on public.sales
+-- Orders: guest checkout allowed (customer_id null), owner or admin can read
+create policy "orders_insert_own_or_guest" on public.orders
+  for insert with check (customer_id is null or customer_id = auth.uid() or public.is_admin());
+create policy "orders_read_own_or_admin" on public.orders
+  for select using (customer_id = auth.uid() or public.is_admin());
+create policy "orders_admin_update" on public.orders
   for update using (public.is_admin());
 
--- Chat messages: users manage their own thread; admins can read all
-create policy "chat_insert_own" on public.chat_messages
-  for insert with check (auth.uid() = user_id);
-create policy "chat_read_own_or_admin" on public.chat_messages
-  for select using (auth.uid() = user_id or public.is_admin());
+-- Order items: access follows the parent order
+create policy "order_items_insert_via_order" on public.order_items
+  for insert with check (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id and (o.customer_id = auth.uid() or o.customer_id is null or public.is_admin())
+    )
+  );
+create policy "order_items_read_via_order" on public.order_items
+  for select using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_id and (o.customer_id = auth.uid() or public.is_admin())
+    )
+  );
+
+-- Sales: read-only for owner/admin, writes only happen via the trigger (security definer)
+create policy "sales_read_own_or_admin" on public.sales
+  for select using (auth.uid() = customer_id or public.is_admin());
+
+-- Conversations: owner or admin
+create policy "conversations_read_own_or_admin" on public.conversations
+  for select using (auth.uid() = customer_id or public.is_admin());
+create policy "conversations_insert_own_or_admin" on public.conversations
+  for insert with check (auth.uid() = customer_id or public.is_admin());
+
+-- Chat messages: access follows the parent conversation
+create policy "chat_messages_read_via_conversation" on public.chat_messages
+  for select using (
+    exists (
+      select 1 from public.conversations c
+      where c.id = conversation_id and (c.customer_id = auth.uid() or public.is_admin())
+    )
+  );
+create policy "chat_messages_insert_via_conversation" on public.chat_messages
+  for insert with check (
+    exists (
+      select 1 from public.conversations c
+      where c.id = conversation_id and (c.customer_id = auth.uid() or public.is_admin())
+    )
+  );
+
+-- Newsletter: anyone can subscribe, only admin can list subscribers
+create policy "newsletter_public_insert" on public.newsletter_subscribers
+  for insert with check (true);
+create policy "newsletter_admin_read" on public.newsletter_subscribers
+  for select using (public.is_admin());
 
 -- ------------------------------------------------------------
--- SEED DATA (sample products so the storefront isn't empty)
+-- SEED DATA
 -- ------------------------------------------------------------
 insert into public.products (name, description, category, price, stock, image_url)
 values

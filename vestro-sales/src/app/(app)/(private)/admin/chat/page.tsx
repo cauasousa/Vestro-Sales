@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Send } from 'lucide-react';
-import { getConversations, sendMessage, type Conversation } from '@/src/lib/chat-store';
+import { chatApi, type Conversation } from '@/src/lib/api';
 
 const replies = [
     "Thanks for reaching out — let me check that for you.",
@@ -11,30 +12,81 @@ const replies = [
 ];
 
 export default function AdminChatPage() {
+    return (
+        <Suspense fallback={null}>
+            <AdminChatContent />
+        </Suspense>
+    );
+}
+
+function AdminChatContent() {
+    const searchParams = useSearchParams();
+    const preselectCustomer = searchParams.get('customer');
+
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const loaded = getConversations();
-        setConversations(loaded);
-        setSelectedId(loaded[0]?.customerId ?? null);
+        chatApi
+            .conversations()
+            .then(async (loaded) => {
+                let list = loaded;
+
+                // Arrived here via "Message client" on an order for a customer
+                // with no message history yet — that conversation won't be in
+                // the list, so fetch (and create) it on demand.
+                if (preselectCustomer && !loaded.some((c) => c.customerId === preselectCustomer)) {
+                    try {
+                        const conversation = await chatApi.conversation(preselectCustomer);
+                        list = [conversation, ...loaded];
+                    } catch {
+                        // customer doesn't exist or isn't reachable — fall through silently
+                    }
+                }
+
+                setConversations(list);
+                setSelectedId(preselectCustomer ?? loaded[0]?.customerId ?? null);
+            })
+            .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load conversations'))
+            .finally(() => setLoading(false));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const active = conversations.find((c) => c.customerId === selectedId) ?? null;
 
-    const handleSend = (e: React.FormEvent) => {
+    const upsertConversation = (updated: Conversation) => {
+        setConversations((prev) => {
+            const exists = prev.some((c) => c.customerId === updated.customerId);
+            return exists
+                ? prev.map((c) => (c.customerId === updated.customerId ? updated : c))
+                : [...prev, updated];
+        });
+    };
+
+    const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedId || !draft.trim()) return;
 
         const text = draft.trim();
         setDraft('');
-        setConversations(sendMessage(selectedId, text, 'admin'));
 
-        setTimeout(() => {
-            const reply = replies[Math.floor(Math.random() * replies.length)];
-            setConversations(sendMessage(selectedId, reply, 'customer'));
-        }, 1500);
+        try {
+            upsertConversation(await chatApi.sendMessage(selectedId, text, 'admin'));
+
+            setTimeout(async () => {
+                const reply = replies[Math.floor(Math.random() * replies.length)];
+                try {
+                    upsertConversation(await chatApi.sendMessage(selectedId, reply, 'customer'));
+                } catch {
+                    // best-effort simulated reply; ignore failures
+                }
+            }, 1500);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to send message');
+        }
     };
 
     return (
@@ -42,7 +94,9 @@ export default function AdminChatPage() {
             <div className="w-72 flex-shrink-0 overflow-hidden rounded-2xl border border-black/5 bg-white">
                 <div className="border-b border-black/5 px-4 py-3">
                     <h1 className="font-display text-lg font-semibold">Support chat</h1>
-                    <p className="text-xs text-ink/50">{conversations.length} conversations</p>
+                    <p className="text-xs text-ink/50">
+                        {loading ? 'Loading…' : `${conversations.length} conversations`}
+                    </p>
                 </div>
                 <div className="overflow-y-auto">
                     {conversations.map((c) => {
@@ -64,9 +118,10 @@ export default function AdminChatPage() {
             </div>
 
             <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-black/5 bg-white">
+                {error && <p className="px-6 pt-4 text-sm text-red-500">{error}</p>}
                 {!active ? (
                     <div className="flex flex-1 items-center justify-center text-sm text-ink/50">
-                        Select a conversation to start replying.
+                        {loading ? 'Loading conversations…' : 'Select a conversation to start replying.'}
                     </div>
                 ) : (
                     <>

@@ -4,18 +4,17 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/src/components/Navbar';
-import { useAuthMock } from '@/src/hooks/useAuthMock';
-import { createUser } from '@/src/lib/user-store';
+import { useAuth } from '@/src/hooks/useAuth';
 
 export default function RegisterPage() {
     const router = useRouter();
-    const { login } = useAuthMock();
+    const { register } = useAuth();
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
-    const [success, setSuccess] = useState(false);
+    const [success, setSuccess] = useState<'signed-in' | 'needs-confirmation' | null>(null);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -23,17 +22,19 @@ export default function RegisterPage() {
         setLoading(true);
 
         try {
-            createUser({ full_name: fullName, email, password, role: 'client' });
-            login(email, password);
+            const result = await register(fullName, email, password);
+            setLoading(false);
+
+            if (result.session) {
+                setSuccess('signed-in');
+                setTimeout(() => router.push('/products'), 1000);
+            } else {
+                setSuccess('needs-confirmation');
+            }
         } catch (err) {
             setLoading(false);
             setError(err instanceof Error ? err.message : 'Registration failed');
-            return;
         }
-
-        setLoading(false);
-        setSuccess(true);
-        setTimeout(() => router.push('/products'), 1000);
     };
 
     return (
@@ -78,7 +79,14 @@ export default function RegisterPage() {
                     </div>
 
                     {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
-                    {success && <p className="mt-4 text-sm text-emerald-600">Account created! Redirecting…</p>}
+                    {success === 'signed-in' && (
+                        <p className="mt-4 text-sm text-emerald-600">Account created! Redirecting…</p>
+                    )}
+                    {success === 'needs-confirmation' && (
+                        <p className="mt-4 text-sm text-emerald-600">
+                            Account created! Check your email to confirm it, then sign in.
+                        </p>
+                    )}
 
                     <button
                         type="submit"

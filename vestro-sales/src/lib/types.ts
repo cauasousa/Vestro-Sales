@@ -1,6 +1,17 @@
 import type { Role } from '@/src/types';
 
-export type { Product, ProductCategory, ProductCreateInput, Role, User } from '@/src/types';
+export type {
+    CartItem,
+    Order,
+    OrderCreateInput,
+    OrderCustomer,
+    OrderStatus,
+    Product,
+    ProductCategory,
+    ProductCreateInput,
+    Role,
+    UserCreateInput,
+} from '@/src/types';
 
 export type Sale = {
     id: string;

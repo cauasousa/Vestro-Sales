@@ -4,11 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/src/components/Navbar';
-import { useAuthMock } from '@/src/hooks/useAuthMock';
+import { useAuth } from '@/src/hooks/useAuth';
 
 export default function LoginPage() {
     const router = useRouter();
-    const { login } = useAuthMock();
+    const { login } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
@@ -20,8 +20,8 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            const user = login(email, password);
-            router.push(user.role === 'manager' ? '/admin' : '/products');
+            const { user } = await login(email, password);
+            router.push(user.role === 'admin' ? '/admin' : '/products');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Login failed');
             setLoading(false);
