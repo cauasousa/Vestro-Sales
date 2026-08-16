@@ -23,7 +23,6 @@ hyperframe==6.1.0
 idna==3.18
 joblib==1.5.3
 lightgbm==4.7.0
-libgomp1==15.0.7
 multidict==6.7.1
 numpy==2.5.2
 packaging==26.3
