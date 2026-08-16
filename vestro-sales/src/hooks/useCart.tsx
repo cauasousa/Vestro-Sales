@@ -52,12 +52,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 );
             }
 
+            const hasDiscount = product.discounted_price != null && product.discounted_price < product.price;
+
             return [
                 ...prev,
                 {
                     productId: product.id,
                     name: product.name,
-                    price: product.price,
+                    price: hasDiscount ? product.discounted_price! : product.price,
+                    originalPrice: hasDiscount ? product.price : null,
                     image_url: product.image_url,
                     stock: product.stock,
                     quantity: Math.min(quantity, maxQuantity),

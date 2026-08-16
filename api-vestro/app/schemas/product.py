@@ -16,6 +16,8 @@ class Product(BaseModel):
     is_active: bool
     created_at: str
     updated_at: str
+    discount_percent: float | None = None
+    discounted_price: float | None = None
 
 
 class ProductCreateRequest(BaseModel):

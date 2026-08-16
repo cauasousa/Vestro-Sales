@@ -21,6 +21,10 @@ const emptyForm = {
 export default function CheckoutPage() {
     const router = useRouter();
     const { items, subtotal, clearCart } = useCart();
+    const savings = items.reduce(
+        (sum, item) => sum + (item.originalPrice ? (item.originalPrice - item.price) * item.quantity : 0),
+        0
+    );
     const [form, setForm] = useState(emptyForm);
     const [placing, setPlacing] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -177,11 +181,22 @@ export default function CheckoutPage() {
                                 <div key={item.productId} className="flex items-center justify-between text-sm">
                                     <span className="text-ink/70">
                                         {item.name} <span className="text-ink/40">× {item.quantity}</span>
+                                        {item.originalPrice != null && (
+                                            <span className="ml-1.5 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">
+                                                Discounted
+                                            </span>
+                                        )}
                                     </span>
                                     <span className="font-medium">${(item.price * item.quantity).toFixed(2)}</span>
                                 </div>
                             ))}
                         </div>
+                        {savings > 0 && (
+                            <div className="mt-3 flex items-center justify-between border-t border-black/5 pt-3 text-sm text-red-600">
+                                <span>Discount savings</span>
+                                <span>-${savings.toFixed(2)}</span>
+                            </div>
+                        )}
                         <div className="mt-4 flex items-center justify-between border-t border-black/5 pt-4 text-base font-semibold">
                             <span>Total</span>
                             <span>${subtotal.toFixed(2)}</span>

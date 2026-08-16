@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.auth import get_current_admin
 from app.db import get_supabase, run_maybe_single, run_query
 from app.schemas import Product, ProductCreateRequest, ProductUpdateRequest
+from app.services.discounts import apply_discount, get_active_discount_rows
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -40,7 +41,10 @@ async def list_products(
         return q.execute()
 
     result = await run_query(query)
-    return result.data or []
+    products = result.data or []
+
+    active_discounts = await get_active_discount_rows()
+    return [apply_discount(p, active_discounts) for p in products]
 
 
 @router.get("/{product_id}", response_model=Product)
@@ -56,7 +60,9 @@ async def get_product(product_id: str) -> Product:
     )
     if not product:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found")
-    return product
+
+    active_discounts = await get_active_discount_rows()
+    return apply_discount(product, active_discounts)
 
 
 @router.post("", response_model=Product, status_code=status.HTTP_201_CREATED)

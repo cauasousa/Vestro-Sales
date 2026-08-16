@@ -1,10 +1,20 @@
 import datetime as dt
 
+from fastapi import HTTPException, status
+
 from app.db import get_supabase, run_query
-from app.schemas import SalesForecastPoint, SalesForecastResponse
+from app.ml import forecaster
+from app.ml.train import train as train_model
+from app.schemas import (
+    SalesForecastPoint,
+    SalesForecastResponse,
+    SalesMLForecastResponse,
+    SalesRetrainResponse,
+)
 
 HISTORY_DAYS = 7
 FORECAST_DAYS = 7
+CONTEXT_HISTORY_DAYS = 14
 
 
 def _daily_totals(rows: list[dict], start: dt.date, days: int) -> dict[dt.date, float]:
@@ -65,3 +75,76 @@ async def get_sales_forecast() -> SalesForecastResponse:
     ]
 
     return SalesForecastResponse(history=history, forecast=forecast)
+
+
+async def get_ml_forecast() -> SalesMLForecastResponse:
+    """LightGBM-based forecast for the next `FORECAST_DAYS` days, informed by calendar
+    context (payday, holidays, promos).
+
+    Each day's prediction feeds back into the next day's `rolling_mean_7d` feature, so the
+    horizon is walked forward one day at a time rather than predicted in a single batch.
+    Degrades to `model_available: false` (empty forecast) when the model hasn't been
+    trained yet — see docs/miss_atribu.md for what's needed to enable this.
+    """
+    model = forecaster.load_model()
+    if model is None:
+        return SalesMLForecastResponse(forecast=[], model_available=False)
+
+    supabase = get_supabase()
+    today = dt.datetime.now(dt.timezone.utc).date()
+
+    history_start = today - dt.timedelta(days=CONTEXT_HISTORY_DAYS - 1)
+    sales_result = await run_query(
+        lambda: supabase.table("sales")
+        .select("total_amount, created_at")
+        .gte("created_at", history_start.isoformat())
+        .execute()
+    )
+    historical_sales = _daily_totals(sales_result.data or [], history_start, CONTEXT_HISTORY_DAYS)
+
+    forecast_start = today + dt.timedelta(days=1)
+    target_dates = [forecast_start + dt.timedelta(days=i) for i in range(FORECAST_DAYS)]
+
+    try:
+        context_result = await run_query(
+            lambda: supabase.table("calendar_context")
+            .select("*")
+            .gte("date", target_dates[0].isoformat())
+            .lte("date", target_dates[-1].isoformat())
+            .execute()
+        )
+        context_by_date = {row["date"]: row for row in (context_result.data or [])}
+    except Exception:
+        # `calendar_context` doesn't exist yet — see docs/miss_atribu.md.
+        context_by_date = {}
+
+    points = []
+    for target_date in target_dates:
+        context_data = context_by_date.get(target_date.isoformat(), {})
+        predicted = forecaster.predict_next_day(model, target_date, historical_sales, context_data)
+        historical_sales[target_date] = predicted  # feeds the next day's rolling mean
+        points.append(
+            SalesForecastPoint(date=target_date.isoformat(), actual=None, predicted=round(predicted, 2))
+        )
+
+    return SalesMLForecastResponse(forecast=points, model_available=True)
+
+
+async def retrain_model(holdout_days: int = 14) -> SalesRetrainResponse:
+    """Re-fits the LightGBM model against current `sales` + `calendar_context` data and
+    overwrites the saved `.pkl`. Unlike running `python -m app.ml.train` from a shell, this
+    also clears `forecaster.load_model`'s cache, so the very next `/forecast-ml` call in
+    this same process picks up the freshly trained model without a restart.
+    """
+    try:
+        result = await run_query(lambda: train_model(holdout_days))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    forecaster.load_model.cache_clear()
+    return SalesRetrainResponse(
+        trained_days=result.trained_days,
+        holdout_days=result.holdout_days,
+        holdout_mae=result.holdout_mae,
+        model_path=result.model_path,
+    )

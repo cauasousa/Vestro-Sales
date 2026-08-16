@@ -7,12 +7,14 @@ class Profile(BaseModel):
     full_name: str | None = None
     role: str
     created_at: str | None = None
+    accepts_marketing: bool = False
 
 
 class RegisterRequest(BaseModel):
     full_name: str
     email: EmailStr
     password: str
+    accepts_marketing: bool = False
 
 
 class LoginRequest(BaseModel):

@@ -102,7 +102,7 @@ export default function AdminProductsPage() {
     };
 
     return (
-        <div className="max-w-6xl">
+        <div className="mx-auto max-w-6xl">
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-display text-2xl font-semibold">Products</h1>
@@ -120,61 +120,73 @@ export default function AdminProductsPage() {
             {error && !showForm && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white">
-                <table className="w-full text-left text-sm">
-                    <thead className="border-b border-black/5 bg-ink/[0.02] text-xs uppercase tracking-wide text-ink/50">
-                        <tr>
-                            <th className="px-4 py-3">Name</th>
-                            <th className="px-4 py-3">Category</th>
-                            <th className="px-4 py-3">Price</th>
-                            <th className="px-4 py-3">Stock</th>
-                            <th className="px-4 py-3 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
+                <div className="scroll-thin max-h-[520px] overflow-y-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="text-xs uppercase tracking-wide text-ink/50">
                             <tr>
-                                <td colSpan={5} className="px-4 py-8 text-center text-ink/50">
-                                    Loading products…
-                                </td>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Name
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Category
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Price
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Stock
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3 text-right">
+                                    Actions
+                                </th>
                             </tr>
-                        ) : products.length === 0 ? (
-                            <tr>
-                                <td colSpan={5} className="px-4 py-8 text-center text-ink/50">
-                                    No products yet.
-                                </td>
-                            </tr>
-                        ) : (
-                            products.map((p) => (
-                                <tr key={p.id} className="border-t border-black/5">
-                                    <td className="px-4 py-3">
-                                        <div className="font-medium">{p.name}</div>
-                                    </td>
-                                    <td className="px-4 py-3 text-ink/60">{p.category}</td>
-                                    <td className="px-4 py-3">${p.price.toFixed(2)}</td>
-                                    <td className="px-4 py-3">{p.stock}</td>
-                                    <td className="px-4 py-3">
-                                        <div className="flex justify-end gap-2">
-                                            <button
-                                                onClick={() => openEdit(p)}
-                                                className="rounded-lg border border-black/10 p-2 hover:bg-black/5"
-                                                aria-label={`Edit ${p.name}`}
-                                            >
-                                                <Pencil size={15} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(p.id)}
-                                                className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-500 hover:bg-red-100"
-                                                aria-label={`Delete ${p.name}`}
-                                            >
-                                                <Trash2 size={15} />
-                                            </button>
-                                        </div>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-ink/50">
+                                        Loading products…
                                     </td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                            ) : products.length === 0 ? (
+                                <tr>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-ink/50">
+                                        No products yet.
+                                    </td>
+                                </tr>
+                            ) : (
+                                products.map((p) => (
+                                    <tr key={p.id} className="border-t border-black/5">
+                                        <td className="px-4 py-3">
+                                            <div className="font-medium">{p.name}</div>
+                                        </td>
+                                        <td className="px-4 py-3 text-ink/60">{p.category}</td>
+                                        <td className="px-4 py-3">${p.price.toFixed(2)}</td>
+                                        <td className="px-4 py-3">{p.stock}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    onClick={() => openEdit(p)}
+                                                    className="rounded-lg border border-black/10 p-2 hover:bg-black/5"
+                                                    aria-label={`Edit ${p.name}`}
+                                                >
+                                                    <Pencil size={15} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(p.id)}
+                                                    className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-500 hover:bg-red-100"
+                                                    aria-label={`Delete ${p.name}`}
+                                                >
+                                                    <Trash2 size={15} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {showForm && (

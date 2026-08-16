@@ -47,14 +47,22 @@ export function useAuth() {
         return result;
     }, []);
 
-    const register = useCallback(async (fullName: string, email: string, password: string) => {
-        const result: AuthResponse = await authApi.register({ full_name: fullName, email, password });
-        if (result.session) {
-            setSession(result.session);
-            setState({ user: result.user, isLoading: false, isAdmin: result.user.role === 'admin' });
-        }
-        return result;
-    }, []);
+    const register = useCallback(
+        async (fullName: string, email: string, password: string, acceptsMarketing = false) => {
+            const result: AuthResponse = await authApi.register({
+                full_name: fullName,
+                email,
+                password,
+                accepts_marketing: acceptsMarketing,
+            });
+            if (result.session) {
+                setSession(result.session);
+                setState({ user: result.user, isLoading: false, isAdmin: result.user.role === 'admin' });
+            }
+            return result;
+        },
+        []
+    );
 
     const logout = useCallback(async () => {
         // Best-effort: always clear the local session even if the API call

@@ -9,6 +9,7 @@ class CartItem(BaseModel):
     productId: str
     name: str
     price: float
+    originalPrice: float | None = None
     image_url: str | None = None
     stock: int
     quantity: int

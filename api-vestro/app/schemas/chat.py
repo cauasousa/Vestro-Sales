@@ -9,6 +9,7 @@ class ChatMessage(BaseModel):
     id: str
     from_: Literal["admin", "customer"] = Field(alias="from")
     text: str
+    orderId: str | None = None
     createdAt: str
 
 
@@ -17,9 +18,23 @@ class ChatMessageCreateRequest(BaseModel):
 
     text: str
     from_: Literal["admin", "customer"] = Field(alias="from")
+    orderId: str | None = None
 
 
 class Conversation(BaseModel):
+    id: str | None = None
     customerId: str
     customerName: str
     messages: list[ChatMessage]
+    reported: bool = False
+
+
+class ChatReportRequest(BaseModel):
+    reason: str | None = None
+
+
+class ChatReport(BaseModel):
+    id: str
+    conversationId: str
+    reason: str | None = None
+    createdAt: str

@@ -12,6 +12,7 @@ export default function RegisterPage() {
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [acceptsMarketing, setAcceptsMarketing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState<'signed-in' | 'needs-confirmation' | null>(null);
@@ -22,7 +23,7 @@ export default function RegisterPage() {
         setLoading(true);
 
         try {
-            const result = await register(fullName, email, password);
+            const result = await register(fullName, email, password, acceptsMarketing);
             setLoading(false);
 
             if (result.session) {
@@ -77,6 +78,16 @@ export default function RegisterPage() {
                             />
                         </div>
                     </div>
+
+                    <label className="mt-4 flex items-start gap-2.5 text-sm text-ink/70">
+                        <input
+                            type="checkbox"
+                            checked={acceptsMarketing}
+                            onChange={(e) => setAcceptsMarketing(e.target.checked)}
+                            className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-black/20"
+                        />
+                        Would you like to receive updates and event notifications by email?
+                    </label>
 
                     {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
                     {success === 'signed-in' && (

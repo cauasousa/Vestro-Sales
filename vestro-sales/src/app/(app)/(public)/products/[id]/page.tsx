@@ -95,7 +95,21 @@ export default function ProductDetailPage() {
                         <p className="mt-4 text-sm leading-relaxed text-ink/70">{product.description}</p>
 
                         <div className="mt-6 flex items-center gap-3">
-                            <span className="text-2xl font-semibold">${product.price.toFixed(2)}</span>
+                            {product.discounted_price != null ? (
+                                <div className="flex items-baseline gap-2">
+                                    <span className="text-2xl font-semibold text-red-600">
+                                        ${product.discounted_price.toFixed(2)}
+                                    </span>
+                                    <span className="text-base text-ink/40 line-through">
+                                        ${product.price.toFixed(2)}
+                                    </span>
+                                    <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">
+                                        -{Math.round(product.discount_percent!)}%
+                                    </span>
+                                </div>
+                            ) : (
+                                <span className="text-2xl font-semibold">${product.price.toFixed(2)}</span>
+                            )}
                             <span className={`text-xs ${product.stock > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                                 {product.stock > 0 ? 'In stock' : 'Sold out'}
                             </span>

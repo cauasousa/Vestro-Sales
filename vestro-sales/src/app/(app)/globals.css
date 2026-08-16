@@ -13,3 +13,27 @@
 .container-page {
     @apply mx-auto w-full max-w-6xl px-6;
 }
+
+/* Thin, neutral scrollbar for bounded-height panels (admin tables/lists) */
+.scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(11, 13, 16, 0.15) transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(11, 13, 16, 0.15);
+    border-radius: 9999px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(11, 13, 16, 0.28);
+}

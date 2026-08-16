@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, X, ShoppingCart, ChevronDown, Package, LogOut } from 'lucide-react';
+import { Menu, X, ShoppingCart, ChevronDown, Package, MessageCircle, LogOut } from 'lucide-react';
 import { useCart } from '@/src/hooks/useCart';
 import { useAuth } from '@/src/hooks/useAuth';
 
@@ -101,9 +101,14 @@ export default function Navbar() {
                         )}
 
                         {user && (
-                            <Link href="/orders" className="text-sm" onClick={() => setOpen(false)}>
-                                Your orders
-                            </Link>
+                            <>
+                                <Link href="/orders" className="text-sm" onClick={() => setOpen(false)}>
+                                    Your orders
+                                </Link>
+                                <Link href="/support" className="text-sm" onClick={() => setOpen(false)}>
+                                    Contact seller
+                                </Link>
+                            </>
                         )}
 
                         {user ? (
@@ -207,6 +212,15 @@ function AccountMenu({
                         >
                             <Package size={15} />
                             Orders
+                        </Link>
+
+                        <Link
+                            href="/support"
+                            onClick={() => setOpen(false)}
+                            className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-ink/70 transition hover:bg-black/5 hover:text-ink"
+                        >
+                            <MessageCircle size={15} />
+                            Contact seller
                         </Link>
 
                         <div className="my-1 border-t border-black/5" />

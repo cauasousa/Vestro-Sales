@@ -58,7 +58,7 @@ export default function AdminUsersPage() {
     };
 
     return (
-        <div className="max-w-4xl">
+        <div className="mx-auto max-w-6xl">
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-display text-2xl font-semibold">Users</h1>
@@ -76,47 +76,65 @@ export default function AdminUsersPage() {
             {error && !showForm && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white">
-                <table className="w-full text-left text-sm">
-                    <thead className="border-b border-black/5 bg-ink/[0.02] text-xs uppercase tracking-wide text-ink/50">
-                        <tr>
-                            <th className="px-4 py-3">Name</th>
-                            <th className="px-4 py-3">Email</th>
-                            <th className="px-4 py-3">Role</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
+                <div className="scroll-thin max-h-[520px] overflow-y-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="text-xs uppercase tracking-wide text-ink/50">
                             <tr>
-                                <td colSpan={3} className="px-4 py-8 text-center text-ink/50">
-                                    Loading users…
-                                </td>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Name
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Email
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Role
+                                </th>
+                                <th className="sticky top-0 z-10 border-b border-black/10 bg-[#F1F0ED] px-4 py-3">
+                                    Joined
+                                </th>
                             </tr>
-                        ) : users.length === 0 ? (
-                            <tr>
-                                <td colSpan={3} className="px-4 py-8 text-center text-ink/50">
-                                    No users yet.
-                                </td>
-                            </tr>
-                        ) : (
-                            users.map((u) => (
-                                <tr key={u.id} className="border-t border-black/5">
-                                    <td className="px-4 py-3 font-medium">{u.full_name || '—'}</td>
-                                    <td className="px-4 py-3 text-ink/60">{u.email}</td>
-                                    <td className="px-4 py-3">
-                                        <span
-                                            className={`rounded-full px-2.5 py-1 text-xs capitalize ${u.role === 'admin'
-                                                ? 'bg-ink text-paper'
-                                                : 'bg-black/5 text-ink/70'
-                                                }`}
-                                        >
-                                            {u.role}
-                                        </span>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={4} className="px-4 py-8 text-center text-ink/50">
+                                        Loading users…
                                     </td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                            ) : users.length === 0 ? (
+                                <tr>
+                                    <td colSpan={4} className="px-4 py-8 text-center text-ink/50">
+                                        No users yet.
+                                    </td>
+                                </tr>
+                            ) : (
+                                users.map((u) => (
+                                    <tr key={u.id} className="border-t border-black/5">
+                                        <td className="px-4 py-3 font-medium">{u.full_name || '—'}</td>
+                                        <td className="px-4 py-3 text-ink/60">{u.email}</td>
+                                        <td className="px-4 py-3">
+                                            <span
+                                                className={`rounded-full px-2.5 py-1 text-xs capitalize ${u.role === 'admin'
+                                                    ? 'bg-ink text-paper'
+                                                    : 'bg-black/5 text-ink/70'
+                                                    }`}
+                                            >
+                                                {u.role}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-ink/50">
+                                            {new Date(u.created_at).toLocaleDateString(undefined, {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric',
+                                            })}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {showForm && (

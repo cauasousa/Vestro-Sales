@@ -1,6 +1,21 @@
 import { getAccessToken, setSession, type Session } from '@/src/lib/session';
-import type { Profile, SalesForecastPoint } from '@/src/lib/types';
-import type { Order, OrderCreateInput, Product, ProductCreateInput, Role } from '@/src/types';
+import type {
+    CalendarContextEntry,
+    CalendarEvent,
+    CalendarEventCreateInput,
+    Profile,
+    SalesForecastPoint,
+} from '@/src/lib/types';
+import type {
+    Discount,
+    DiscountCreateInput,
+    Order,
+    OrderCreateInput,
+    OrderStatus,
+    Product,
+    ProductCreateInput,
+    Role,
+} from '@/src/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -52,7 +67,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export type AuthResponse = { user: Profile; session: Session | null };
 
 export const authApi = {
-    register: (input: { full_name: string; email: string; password: string }) =>
+    register: (input: { full_name: string; email: string; password: string; accepts_marketing?: boolean }) =>
         request<AuthResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(input) }),
 
     login: (email: string, password: string) =>
@@ -92,6 +107,20 @@ export const productsApi = {
     remove: (id: string) => request<void>(`/api/products/${id}`, { method: 'DELETE' }),
 };
 
+// ---- discounts ----
+
+export const discountsApi = {
+    list: () => request<Discount[]>('/api/discounts'),
+
+    create: (input: DiscountCreateInput) =>
+        request<Discount>('/api/discounts', { method: 'POST', body: JSON.stringify(input) }),
+
+    update: (id: string, input: DiscountCreateInput) =>
+        request<Discount>(`/api/discounts/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+
+    remove: (id: string) => request<void>(`/api/discounts/${id}`, { method: 'DELETE' }),
+};
+
 // ---- orders ----
 
 export const ordersApi = {
@@ -102,6 +131,11 @@ export const ordersApi = {
 
     place: (input: OrderCreateInput) =>
         request<Order>('/api/orders', { method: 'POST', body: JSON.stringify(input) }),
+
+    // Not yet backed by the API — see docs/api-requirements.md. Wired up so the
+    // admin orders UI works as soon as PATCH /api/orders/:id ships.
+    update: (id: string, input: { status?: OrderStatus; trackingCode?: string }) =>
+        request<Order>(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
 };
 
 // ---- users ----
@@ -129,19 +163,37 @@ export const metricsApi = {
 
 // ---- chat ----
 
-export type ChatMessage = { id: string; from: 'admin' | 'customer'; text: string; createdAt: string };
-export type Conversation = { customerId: string; customerName: string; messages: ChatMessage[] };
+export type ChatMessage = {
+    id: string;
+    from: 'admin' | 'customer';
+    text: string;
+    orderId?: string | null;
+    createdAt: string;
+};
+export type Conversation = {
+    id: string | null;
+    customerId: string;
+    customerName: string;
+    messages: ChatMessage[];
+    reported: boolean;
+};
 
 export const chatApi = {
     conversations: () => request<Conversation[]>('/api/chat/conversations'),
 
     conversation: (customerId: string) => request<Conversation>(`/api/chat/conversations/${customerId}`),
 
-    sendMessage: (customerId: string, text: string, from: ChatMessage['from']) =>
+    sendMessage: (customerId: string, text: string, from: ChatMessage['from'], orderId?: string | null) =>
         request<Conversation>(`/api/chat/conversations/${customerId}/messages`, {
             method: 'POST',
-            body: JSON.stringify({ text, from }),
+            body: JSON.stringify({ text, from, orderId: orderId ?? null }),
         }),
+
+    report: (customerId: string, reason?: string) =>
+        request<{ id: string; conversationId: string; reason: string | null; createdAt: string }>(
+            `/api/chat/conversations/${customerId}/report`,
+            { method: 'POST', body: JSON.stringify({ reason: reason ?? null }) }
+        ),
 };
 
 // ---- sales / AI assistant ----
@@ -150,6 +202,9 @@ export const api = {
     getSalesForecast: () =>
         request<{ history: SalesForecastPoint[]; forecast: SalesForecastPoint[] }>('/api/sales/forecast'),
 
+    getMlForecast: () =>
+        request<{ forecast: SalesForecastPoint[]; model_available: boolean }>('/api/sales/forecast-ml'),
+
     askAssistant: (prompt: string) =>
         request<{ answer: string }>('/api/ai/assistant', {
             method: 'POST',
@@ -157,4 +212,69 @@ export const api = {
         }),
 
     summarizeFeedback: () => request<{ summary: string }>('/api/ai/summarize-feedback', { method: 'POST' }),
+};
+
+// ---- calendar context (feeds the ML sales forecast) ----
+// The only two fields here that are actual admin input — everything else on the
+// calendar_context row (payday, end-of-month, holiday distance) is derived from the
+// date itself by the backend.
+
+export const calendarContextApi = {
+    list: (range?: { start?: string; end?: string }) => {
+        const params = new URLSearchParams();
+        if (range?.start) params.set('start', range.start);
+        if (range?.end) params.set('end', range.end);
+        const query = params.toString();
+        return request<CalendarContextEntry[]>(`/api/sales/calendar-context${query ? `?${query}` : ''}`);
+    },
+
+    upsert: (input: { date: string; discount_rate: number; has_event: boolean }) =>
+        request<CalendarContextEntry>('/api/sales/calendar-context', {
+            method: 'POST',
+            body: JSON.stringify(input),
+        }),
+
+    remove: (date: string) => request<void>(`/api/sales/calendar-context/${date}`, { method: 'DELETE' }),
+};
+
+// ---- calendar events (named events, multiple per day, tied to the scheduler) ----
+
+export const calendarEventsApi = {
+    list: (range?: { start?: string; end?: string }) => {
+        const params = new URLSearchParams();
+        if (range?.start) params.set('start', range.start);
+        if (range?.end) params.set('end', range.end);
+        const query = params.toString();
+        return request<CalendarEvent[]>(`/api/sales/calendar-events${query ? `?${query}` : ''}`);
+    },
+
+    create: (input: CalendarEventCreateInput) =>
+        request<CalendarEvent>('/api/sales/calendar-events', { method: 'POST', body: JSON.stringify(input) }),
+
+    update: (id: string, input: CalendarEventCreateInput) =>
+        request<CalendarEvent>(`/api/sales/calendar-events/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+
+    remove: (id: string) => request<void>(`/api/sales/calendar-events/${id}`, { method: 'DELETE' }),
+};
+
+// ---- marketing email (Resend) ----
+
+export type MarketingEmailInput = {
+    recipientMode: 'opted_in' | 'manual';
+    manualEmails?: string[];
+    subject: string;
+    body: string;
+};
+
+export type MarketingEmailResult = {
+    recipientCount: number;
+    sentCount: number;
+    failedEmails: string[];
+};
+
+export const marketingApi = {
+    optedInCount: () => request<number>('/api/marketing/opted-in-count'),
+
+    send: (input: MarketingEmailInput) =>
+        request<MarketingEmailResult>('/api/marketing/send', { method: 'POST', body: JSON.stringify(input) }),
 };

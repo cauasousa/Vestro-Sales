@@ -2,6 +2,7 @@ export type CartItem = {
     productId: string;
     name: string;
     price: number;
+    originalPrice?: number | null;
     image_url: string;
     stock: number;
     quantity: number;
@@ -23,6 +24,7 @@ export type Order = {
     items: CartItem[];
     subtotal: number;
     status: OrderStatus;
+    trackingCode?: string | null;
     customer: OrderCustomer;
     createdAt: string;
 };

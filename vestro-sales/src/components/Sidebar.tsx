@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Package, Receipt, Users, MessagesSquare, Sparkles, Store, LogOut, ArrowLeft } from 'lucide-react';
+import { LayoutDashboard, Package, Receipt, CalendarRange, Users, MessagesSquare, Sparkles, Store, LogOut, ArrowLeft } from 'lucide-react';
 import { useAuth } from '@/src/hooks/useAuth';
 
 const items = [
     { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/admin/products', label: 'Products', icon: Package },
     { href: '/admin/orders', label: 'Orders', icon: Receipt },
+    { href: '/admin/planning', label: 'Planning', icon: CalendarRange },
     { href: '/admin/users', label: 'Users', icon: Users },
     { href: '/admin/chat', label: 'Support chat', icon: MessagesSquare },
     { href: '/admin/ai-assistant', label: 'AI assistant', icon: Sparkles },

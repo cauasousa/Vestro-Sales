@@ -14,8 +14,10 @@ Dados de exemplo para popular cada tabela criada por `schema.sql` (ver `docs/dat
 | 6 | `06_conversations.sql` | `conversations` | `profiles` |
 | 7 | `07_chat_messages.sql` | `chat_messages` | `conversations` |
 | 8 | `08_newsletter_subscribers.sql` | `newsletter_subscribers` | — |
+| 9 | `09_calendar_context.sql` | `calendar_context` | — (tabela precisa existir, ver `docs/database-schema.md` §1.9/§2) |
+| 10 | `10_sales_training_seed.sql` | `sales` | — |
 
-Rode `schema.sql` primeiro (cria as tabelas). Depois esses 8 arquivos em ordem.
+Rode `schema.sql` primeiro (cria as tabelas). Depois esses arquivos em ordem — `01`–`08` são o seed "normal" do produto; `09` e `10` são **opcionais**, só necessários pra treinar o modelo de forecast (`app/ml/train.py`, ver `docs/miss_atribu.md`).
 
 ## ⚠️ Sobre `02_profiles.sql`
 
@@ -36,6 +38,20 @@ Se você criar os usuários pelo painel em vez de rodar o SQL direto, os UUIDs v
 ## ⚠️ Sobre `sales`
 
 `sales` é alimentada **automaticamente** por um trigger (`trg_order_item_to_sale`) toda vez que uma linha é inserida em `order_items` — não insira ali manualmente para pedidos reais, ou a receita fica duplicada. `05_sales.sql` só adiciona pontos de histórico extra (sem `order_id`, coluna é nullable) pra deixar o gráfico do dashboard com mais dados de tendência, sem estar ligado a nenhum pedido.
+
+## ⚠️ Sobre `09_calendar_context.sql` e `10_sales_training_seed.sql`
+
+Esses dois são **opcionais** e servem só pra ter dados suficientes pra rodar
+`python -m app.ml.train` (o forecast em `GET /api/sales/forecast-ml` funciona sem eles,
+só que sempre devolve `model_available: false`). Rode os dois juntos, nessa ordem, pra
+`calendar_context` e o histórico sintético de `sales` cobrirem o mesmo período — sem isso
+as features contextuais do treino (`is_payday`, `is_holiday`, etc.) ficam em default e o
+modelo não aprende nada com elas.
+
+`10_sales_training_seed.sql` insere **584 dias** de receita sintética (2025-01-01 a
+2026-08-07) na tabela `sales` — a mesma que alimenta `GET /api/metrics` e
+`GET /api/sales/forecast`. Rode só em banco de dev/staging, ou apague as linhas depois
+(instruções de cleanup no fim do próprio arquivo).
 
 ## Reset (opcional)
 

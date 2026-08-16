@@ -13,6 +13,11 @@ export default function ProductCard({ product }: { product: Product }) {
                 transition={{ type: 'spring', stiffness: 300 }}
             >
                 <div className="aspect-square w-full overflow-hidden bg-ink/5 relative">
+                    {product.discount_percent != null && (
+                        <span className="absolute left-3 top-3 z-10 rounded-full bg-red-500 px-2.5 py-1 text-xs font-semibold text-white">
+                            -{Math.round(product.discount_percent)}%
+                        </span>
+                    )}
                     {product.image_url ? (
                         <motion.img
                             src={product.image_url}
@@ -31,7 +36,16 @@ export default function ProductCard({ product }: { product: Product }) {
                     <span className="text-xs uppercase tracking-wide text-muted">{product.category}</span>
                     <h3 className="font-display text-base font-semibold">{product.name}</h3>
                     <div className="mt-auto flex items-center justify-between pt-3">
-                        <span className="text-lg font-semibold">${product.price.toFixed(2)}</span>
+                        {product.discounted_price != null ? (
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-lg font-semibold text-red-600">
+                                    ${product.discounted_price.toFixed(2)}
+                                </span>
+                                <span className="text-sm text-ink/40 line-through">${product.price.toFixed(2)}</span>
+                            </div>
+                        ) : (
+                            <span className="text-lg font-semibold">${product.price.toFixed(2)}</span>
+                        )}
                         <span className={`text-xs ${product.stock > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                             {product.stock > 0 ? 'In stock' : 'Sold out'}
                         </span>

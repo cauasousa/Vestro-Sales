@@ -22,7 +22,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
         <html lang="en">
-            <body className={`${spaceGrotesk.variable} ${inter.variable} font-body bg-paper text-ink antialiased`}>
+            <body
+                className={`${spaceGrotesk.variable} ${inter.variable} font-body bg-paper text-ink antialiased`}
+                suppressHydrationWarning
+            >
                 <CartProvider>{children}</CartProvider>
             </body>
         </html>

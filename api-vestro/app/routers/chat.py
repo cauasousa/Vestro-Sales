@@ -3,8 +3,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import get_current_admin, get_current_profile
-from app.schemas import ChatMessageCreateRequest, Conversation
-from app.services.chat import add_message, get_conversation, list_conversations
+from app.schemas import ChatMessageCreateRequest, ChatReport, ChatReportRequest, Conversation
+from app.services.chat import add_message, get_conversation, list_conversations, report_conversation
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -37,4 +37,14 @@ async def post_message(
     profile: Annotated[dict[str, Any], Depends(get_current_profile)],
 ) -> Conversation:
     _require_owner_or_admin(profile, customer_id)
-    return await add_message(customer_id, payload.text, payload.from_)
+    return await add_message(customer_id, payload.text, payload.from_, payload.orderId)
+
+
+@router.post("/conversations/{customer_id}/report", response_model=ChatReport, status_code=status.HTTP_201_CREATED)
+async def report(
+    customer_id: str,
+    payload: ChatReportRequest,
+    profile: Annotated[dict[str, Any], Depends(get_current_profile)],
+) -> ChatReport:
+    _require_owner_or_admin(profile, customer_id)
+    return await report_conversation(customer_id, payload.reason)

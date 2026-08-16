@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { MessageCircle, Package } from 'lucide-react';
 import Navbar from '@/src/components/Navbar';
@@ -19,7 +19,17 @@ const statusStyles: Record<OrderStatus, string> = {
 };
 
 export default function OrdersPage() {
+    return (
+        <Suspense fallback={null}>
+            <OrdersContent />
+        </Suspense>
+    );
+}
+
+function OrdersContent() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const highlightId = searchParams.get('highlight');
     const { user, isLoading: authLoading } = useAuth();
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
@@ -40,6 +50,11 @@ export default function OrdersPage() {
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load orders'))
             .finally(() => setLoading(false));
     }, [user]);
+
+    useEffect(() => {
+        if (!highlightId || orders.length === 0) return;
+        document.getElementById(`order-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [highlightId, orders]);
 
     if (authLoading || !user) {
         return (
@@ -90,7 +105,13 @@ export default function OrdersPage() {
                 ) : (
                     <div className="mt-8 space-y-4">
                         {orders.map((order) => (
-                            <div key={order.id} className="rounded-2xl border border-black/5 bg-white p-6">
+                            <div
+                                key={order.id}
+                                id={`order-${order.id}`}
+                                className={`rounded-2xl border bg-white p-6 transition-colors ${
+                                    highlightId === order.id ? 'border-accent ring-2 ring-accent/20' : 'border-black/5'
+                                }`}
+                            >
                                 <div className="flex flex-wrap items-start justify-between gap-4">
                                     <div>
                                         <div className="flex items-center gap-2">
@@ -128,6 +149,16 @@ export default function OrdersPage() {
                                             <span className="font-medium">${(item.price * item.quantity).toFixed(2)}</span>
                                         </div>
                                     ))}
+                                </div>
+
+                                <div className="mt-4 flex justify-end border-t border-black/5 pt-4">
+                                    <Link
+                                        href={`/support?order=${order.id}`}
+                                        className="flex items-center gap-1.5 rounded-full border border-black/10 px-3.5 py-2 text-xs font-medium text-ink/60 transition hover:border-black/30 hover:text-ink"
+                                    >
+                                        <MessageCircle size={13} />
+                                        Contact us about this order
+                                    </Link>
                                 </div>
                             </div>
                         ))}

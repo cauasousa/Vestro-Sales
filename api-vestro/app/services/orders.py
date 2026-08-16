@@ -4,6 +4,7 @@ from supabase import Client
 
 from app.db import get_supabase, run_maybe_single, run_query
 from app.schemas import CartItem, Order, OrderCreateRequest, OrderCustomer
+from app.services.discounts import apply_discount, get_active_discount_rows
 
 
 def _row_to_order(order_row: dict[str, Any], item_rows: list[dict[str, Any]]) -> Order:
@@ -15,6 +16,7 @@ def _row_to_order(order_row: dict[str, Any], item_rows: list[dict[str, Any]]) ->
                 productId=row["product_id"],
                 name=row["name"],
                 price=row["price"],
+                originalPrice=row.get("original_price"),
                 image_url=row.get("image_url"),
                 stock=row["quantity"],
                 quantity=row["quantity"],
@@ -35,18 +37,51 @@ def _row_to_order(order_row: dict[str, Any], item_rows: list[dict[str, Any]]) ->
 
 
 async def _fetch_items(supabase: Client, order_id: str) -> list[dict[str, Any]]:
-    result = await run_query(
-        lambda: supabase.table("order_items")
-        .select("product_id, name, price, quantity, image_url")
-        .eq("order_id", order_id)
+    try:
+        result = await run_query(
+            lambda: supabase.table("order_items")
+            .select("product_id, name, price, original_price, quantity, image_url")
+            .eq("order_id", order_id)
+            .execute()
+        )
+    except Exception:
+        # `order_items.original_price` doesn't exist yet until the schema migration
+        # (docs/migration_discounts_and_reports.sql) has been run — fall back to the
+        # pre-discount column set instead of breaking every order read.
+        result = await run_query(
+            lambda: supabase.table("order_items")
+            .select("product_id, name, price, quantity, image_url")
+            .eq("order_id", order_id)
+            .execute()
+        )
+    return result.data or []
+
+
+async def _resolve_item_price(supabase: Client, item: CartItem, active_discounts: list[dict[str, Any]]) -> tuple[float, float | None]:
+    """Never trust the client-submitted price for the charged amount — re-derive it
+    from the live product row + any active discount. Falls back to the submitted
+    price only if the product can no longer be found (e.g. deleted mid-checkout)."""
+    product = await run_maybe_single(
+        lambda: supabase.table("products")
+        .select("id, price, category")
+        .eq("id", item.productId)
+        .maybe_single()
         .execute()
     )
-    return result.data or []
+    if not product:
+        return item.price, item.originalPrice
+
+    enriched = apply_discount(dict(product), active_discounts)
+    charged_price = enriched["discounted_price"] if enriched["discount_percent"] else enriched["price"]
+    return charged_price, enriched["price"]
 
 
 async def create_order(payload: OrderCreateRequest, customer_id: str | None) -> Order:
     supabase = get_supabase()
-    subtotal = round(sum(item.price * item.quantity for item in payload.items), 2)
+    active_discounts = await get_active_discount_rows()
+
+    resolved = [await _resolve_item_price(supabase, item, active_discounts) for item in payload.items]
+    subtotal = round(sum(price * item.quantity for item, (price, _) in zip(payload.items, resolved)), 2)
 
     order_result = await run_query(
         lambda: supabase.table("orders")
@@ -70,15 +105,23 @@ async def create_order(payload: OrderCreateRequest, customer_id: str | None) -> 
             "order_id": order_row["id"],
             "product_id": item.productId,
             "name": item.name,
-            "price": item.price,
+            "price": price,
+            "original_price": original_price if original_price != price else None,
             "quantity": item.quantity,
             "image_url": item.image_url,
         }
-        for item in payload.items
+        for item, (price, original_price) in zip(payload.items, resolved)
     ]
     # `sales` rows are populated automatically by the record_sale_from_order_item
     # trigger on insert — inserting them here too would double-count revenue.
-    await run_query(lambda: supabase.table("order_items").insert(item_rows).execute())
+    try:
+        await run_query(lambda: supabase.table("order_items").insert(item_rows).execute())
+    except Exception:
+        # `order_items.original_price` doesn't exist yet until the schema migration
+        # (docs/migration_discounts_and_reports.sql) has been run — retry without it
+        # rather than failing checkout. The discount is still applied to `price`.
+        legacy_rows = [{k: v for k, v in row.items() if k != "original_price"} for row in item_rows]
+        await run_query(lambda: supabase.table("order_items").insert(legacy_rows).execute())
 
     return _row_to_order(order_row, item_rows)
 

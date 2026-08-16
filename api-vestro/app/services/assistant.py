@@ -1,7 +1,31 @@
+import asyncio
+from functools import lru_cache
+
+from google import genai
+from google.genai import types
+
+from app.config import get_settings
 from app.db import get_supabase, run_query
 from app.services.metrics import WINDOW_DAYS, get_recent_activity
 
 LOW_STOCK_THRESHOLD = 5
+
+SYSTEM_INSTRUCTION = (
+    "You are the admin-facing AI assistant for Vestro, a small e-commerce store. "
+    "Answer the admin's question using ONLY the store data given to you — never invent "
+    "numbers. If the data doesn't cover what's asked, say so plainly instead of guessing. "
+    "Keep answers to 1-3 sentences, plain text, no markdown."
+)
+
+
+@lru_cache
+def _client() -> genai.Client | None:
+    """None when GEMINI_API_KEY isn't set — callers fall back to the keyword-matched
+    answer instead of erroring, same degrade-gracefully pattern as forecaster.load_model()."""
+    api_key = get_settings().gemini_api_key
+    if not api_key:
+        return None
+    return genai.Client(api_key=api_key)
 
 
 async def _top_product() -> str | None:
@@ -42,8 +66,68 @@ async def _low_stock_products() -> list[dict]:
     return result.data or []
 
 
+async def _build_context() -> str:
+    """Snapshots the same live Supabase figures the old keyword-matched assistant used,
+    as plain text — grounds every Gemini answer in real numbers instead of letting the
+    model guess at business data it was never given."""
+    from app.services.forecast import get_sales_forecast
+
+    activity = await get_recent_activity()
+    forecast = await get_sales_forecast()
+    top = await _top_product()
+    low_stock = await _low_stock_products()
+
+    next_point = forecast.forecast[0] if forecast.forecast else None
+    forecast_line = (
+        f"Forecast for {next_point.date}: ${next_point.predicted:.2f}."
+        if next_point and next_point.predicted is not None
+        else "No forecast available yet."
+    )
+    low_stock_line = (
+        ", ".join(f"{p['name']} ({p['stock']} left)" for p in low_stock) if low_stock else "none"
+    )
+
+    return (
+        f"Last {WINDOW_DAYS} days: ${activity['revenue']:.2f} revenue, "
+        f"{activity['orders_count']} orders, {activity['new_customers']} new customers.\n"
+        f"{forecast_line}\n"
+        f"Top-selling product: {top or 'no sales recorded yet'}.\n"
+        f"Low stock (<= {LOW_STOCK_THRESHOLD} units): {low_stock_line}."
+    )
+
+
+GEMINI_TIMEOUT_SECONDS = 20
+
+
 async def get_assistant_answer(prompt: str) -> str:
-    """Keyword-matched answers over live Supabase data (no LLM configured)."""
+    client = _client()
+    if client is None:
+        return await _keyword_answer(prompt)
+
+    context = await _build_context()
+    try:
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=get_settings().gemini_model,
+                contents=f"Store data:\n{context}\n\nAdmin question: {prompt}",
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.2,
+                ),
+            ),
+            timeout=GEMINI_TIMEOUT_SECONDS,
+        )
+    except (Exception, asyncio.TimeoutError):
+        # Bad key, quota, network blip, transient Gemini outage (observed: occasional
+        # multi-second hangs and 503 "high demand" errors even with a valid key/model),
+        # etc. — don't hang or 500 the admin's assistant over it.
+        return await _keyword_answer(prompt)
+
+    return (response.text or "").strip() or await _keyword_answer(prompt)
+
+
+async def _keyword_answer(prompt: str) -> str:
+    """Fallback used when GEMINI_API_KEY isn't configured or the Gemini call fails."""
     q = prompt.lower()
 
     if "revenue" in q or "sales" in q:

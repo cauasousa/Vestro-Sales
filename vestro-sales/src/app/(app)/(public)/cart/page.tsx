@@ -7,6 +7,10 @@ import { useCart } from '@/src/hooks/useCart';
 
 export default function CartPage() {
     const { items, subtotal, updateQuantity, removeItem } = useCart();
+    const savings = items.reduce(
+        (sum, item) => sum + (item.originalPrice ? (item.originalPrice - item.price) * item.quantity : 0),
+        0
+    );
 
     return (
         <>
@@ -53,7 +57,14 @@ export default function CartPage() {
                                         >
                                             {item.name}
                                         </Link>
-                                        <p className="mt-1 text-sm text-ink/60">${item.price.toFixed(2)}</p>
+                                        <div className="mt-1 flex items-center gap-2">
+                                            <p className="text-sm text-ink/60">${item.price.toFixed(2)}</p>
+                                            {item.originalPrice != null && (
+                                                <p className="text-xs text-ink/35 line-through">
+                                                    ${item.originalPrice.toFixed(2)}
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="flex items-center rounded-full border border-black/10">
@@ -99,6 +110,12 @@ export default function CartPage() {
                                 <span>Subtotal</span>
                                 <span>${subtotal.toFixed(2)}</span>
                             </div>
+                            {savings > 0 && (
+                                <div className="mt-2 flex items-center justify-between text-sm text-red-600">
+                                    <span>Discount savings</span>
+                                    <span>-${savings.toFixed(2)}</span>
+                                </div>
+                            )}
                             <div className="mt-2 flex items-center justify-between text-sm text-ink/60">
                                 <span>Shipping</span>
                                 <span>Free</span>

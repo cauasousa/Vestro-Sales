@@ -21,13 +21,25 @@ def _session_from_supabase(session: Any) -> Session | None:
 
 async def _profile_for(user_id: str) -> Profile:
     supabase = get_supabase()
-    profile = await run_maybe_single(
-        lambda: supabase.table("profiles")
-        .select("id, email, full_name, role, created_at")
-        .eq("id", user_id)
-        .maybe_single()
-        .execute()
-    )
+    try:
+        profile = await run_maybe_single(
+            lambda: supabase.table("profiles")
+            .select("id, email, full_name, role, created_at, accepts_marketing")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception:
+        # `profiles.accepts_marketing` doesn't exist yet until the schema migration
+        # (docs/migration_marketing_email.sql) has been run — fall back to the
+        # pre-migration column set instead of breaking login/register/me.
+        profile = await run_maybe_single(
+            lambda: supabase.table("profiles")
+            .select("id, email, full_name, role, created_at")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
     if not profile:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Profile not found")
     return Profile(**profile)
@@ -51,6 +63,21 @@ async def register(payload: RegisterRequest) -> AuthResponse:
 
     if not auth_result.user:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Registration failed")
+
+    if payload.accepts_marketing:
+        # profiles.accepts_marketing defaults to false via handle_new_user(), so only
+        # a True needs writing back. Best-effort: if the column isn't migrated yet
+        # (docs/migration_marketing_email.sql), don't fail the whole signup over it.
+        supabase = get_supabase()
+        try:
+            await run_query(
+                lambda: supabase.table("profiles")
+                .update({"accepts_marketing": True})
+                .eq("id", auth_result.user.id)
+                .execute()
+            )
+        except Exception:
+            pass
 
     profile = await _profile_for(auth_result.user.id)
     return AuthResponse(user=profile, session=_session_from_supabase(auth_result.session))

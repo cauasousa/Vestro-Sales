@@ -24,9 +24,10 @@ Estende `auth.users` do Supabase Auth com o `role` da aplicação. Já existe em
 | `email` | `text` not null | |
 | `full_name` | `text` | |
 | `role` | `text` not null default `'customer'` | check `in ('admin','customer')` |
+| `accepts_marketing` | `boolean` not null default `false` | **novo** — consentimento pra receber email de marketing/evento, capturado no checkbox de `POST /api/auth/register`. `handle_new_user` sempre insere `false`; `register()` faz um `update` logo em seguida só quando o checkbox foi marcado (nada a fazer no caso `false`, já é o default). |
 | `created_at` | `timestamptz` default `now()` | |
 
-Populada automaticamente pelo trigger `handle_new_user` em todo signup. Usada por: `GET /api/auth/me`, `GET /api/users`, checagem de admin em todas as rotas protegidas.
+Populada automaticamente pelo trigger `handle_new_user` em todo signup. Usada por: `GET /api/auth/me`, `GET /api/users`, checagem de admin em todas as rotas protegidas, e `GET /api/marketing/opted-in-count` / `POST /api/marketing/send` (filtro `accepts_marketing = true`). SQL incremental: `docs/migration_marketing_email.sql`.
 
 ### 1.2 `products`
 Já existe em `schema.sql`, mantida como está — cobre `Product` (`src/types/product.ts`).
@@ -43,7 +44,10 @@ Já existe em `schema.sql`, mantida como está — cobre `Product` (`src/types/p
 | `is_active` | `boolean` not null default `true` | |
 | `created_at` / `updated_at` | `timestamptz` | `updated_at` mantido por trigger `set_updated_at` |
 
-Usada por: todas as rotas `/api/products*` (§4 de `api-requirements.md`).
+Usada por: todas as rotas `/api/products*` (§4 de `api-requirements.md`). As respostas de
+`GET /api/products` e `GET /api/products/{id}` agora incluem `discount_percent` e
+`discounted_price` (não-persistidos, calculados on-the-fly a partir de `discounts`, §1.10)
+— `null` quando não há desconto ativo pro produto.
 
 ### 1.3 `orders` (nova)
 O pedido em si — cabeçalho com dados de entrega e status. Cobre `Order['customer']` (`src/types/cart.ts`).
@@ -72,8 +76,11 @@ Os itens de um pedido. Cobre `CartItem` (`src/types/cart.ts`) — guarda `name`/
 | `order_id` | `uuid` references `orders(id)` on delete cascade | |
 | `product_id` | `uuid` references `products(id)` on delete set null | |
 | `name` | `text` not null | snapshot do nome |
-| `price` | `numeric(10,2)` not null | snapshot do preço, check `>= 0` |
+| `price` | `numeric(10,2)` not null | snapshot do preço **já com desconto aplicado** (o preço cobrado), check `>= 0` |
+| `original_price` | `numeric(10,2)` | **novo** — snapshot do preço sem desconto, só preenchido quando um desconto estava ativo pro produto no momento da compra; null = sem desconto |
 | `quantity` | `integer` not null | check `> 0` |
+
+`price`/`original_price` são recalculados no backend a partir do produto + descontos ativos em `create_order` (`app/services/orders.py::_resolve_item_price`) — o preço enviado pelo cliente no `POST /api/orders` nunca é usado diretamente pro valor cobrado, só como fallback se o produto tiver sido removido entre o carrinho e o checkout.
 
 ### 1.5 `sales` (mantida, agora derivada)
 Ledger de receita usado só para o gráfico de forecast (`SalesForecastPoint`, `GET /api/sales/forecast`, §7). Já existe em `schema.sql`; ganha uma FK pra `orders` e passa a ser preenchida **automaticamente** por trigger a cada `order_items` inserido — nenhuma rota grava nela direto.
@@ -98,7 +105,10 @@ Uma thread de suporte por cliente. Cobre `Conversation` (`src/lib/chat-store.ts`
 | `customer_name` | `text` not null | snapshot, evita join só pra exibir nome na lista |
 | `created_at` | `timestamptz` default `now()` | |
 
-Usada por: `GET /api/chat/conversations`, `GET /api/chat/conversations/:customerId` (§8).
+Usada por: `GET /api/chat/conversations`, `GET /api/chat/conversations/:customerId` (§8). O
+`id` agora é exposto no schema `Conversation` do backend (antes só `customerId`) — necessário
+pro frontend se inscrever em `chat_messages` via Supabase Realtime filtrado por
+`conversation_id` (ver `docs/miss_atribu.md`-style nota em §8 sobre real-time).
 
 ### 1.7 `chat_messages` (redesenhada)
 Mensagens dentro de uma conversa. Substitui a versão antiga (1 pergunta + 1 `ai_response`). Cobre `ChatMessage` (`src/lib/chat-store.ts`).
@@ -109,9 +119,39 @@ Mensagens dentro de uma conversa. Substitui a versão antiga (1 pergunta + 1 `ai
 | `conversation_id` | `uuid` references `conversations(id)` on delete cascade | |
 | `sender` | `text` not null | check `in ('admin','customer')` |
 | `text` | `text` not null | |
+| `order_id` | `uuid` references `orders(id)` on delete set null | **novo** — opcional, preenchido quando a mensagem parte do botão "Contact us about this order"; renderizado como um chip clicável tanto pro admin quanto pro cliente. Sem policy de RLS própria — segue a mesma linha (RLS de `chat_messages` já cobre). |
 | `created_at` | `timestamptz` default `now()` | |
 
-Usada por: `POST /api/chat/conversations/:customerId/messages` (§8).
+Usada por: `POST /api/chat/conversations/:customerId/messages` (§8). As policies de RLS
+existentes (owner-or-admin) já são suficientes pro Supabase Realtime — o frontend se
+autentica com o JWT do usuário antes de assinar o channel, então o Realtime aplica as
+mesmas policies que a leitura via REST.
+
+SQL incremental: `docs/migration_chat_order_link.sql` (mesmo padrão idempotente de
+`migration_discounts_and_reports.sql` — `add column if not exists`, não precisa re-rodar
+o `## 2` inteiro).
+
+**Pendência separada, fácil de esquecer:** RLS não é suficiente pra `postgres_changes`
+disparar — a tabela também precisa estar na publication `supabase_realtime` (Database >
+Replication no painel do Supabase, ou `alter publication supabase_realtime add table
+public.chat_messages`). Sem isso o channel conecta normalmente (`status: SUBSCRIBED`) mas
+nunca recebe evento nenhum, silenciosamente — não dá erro em lugar nenhum. SQL incremental:
+`docs/migration_realtime_chat.sql`.
+
+### 1.7.1 `chat_reports` (nova)
+Denúncia de uma conversa pelo cliente (botão "Report" no chat). Uma linha por denúncia —
+uma conversa pode ter mais de uma se o cliente reportar de novo.
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `id` | `uuid` PK default `uuid_generate_v4()` | |
+| `conversation_id` | `uuid` references `conversations(id)` on delete cascade | |
+| `reason` | `text` | opcional, texto livre |
+| `created_at` | `timestamptz` default `now()` | |
+
+Usada por: `POST /api/chat/conversations/:customerId/report`. O admin vê um badge
+"Reported" na lista de conversas (`Conversation.reported`, calculado a partir de qualquer
+linha existente pra aquela `conversation_id`).
 
 ### 1.8 `newsletter_subscribers` (nova)
 
@@ -123,6 +163,92 @@ Usada por: `POST /api/chat/conversations/:customerId/messages` (§8).
 | `unsubscribed_at` | `timestamptz` | null = ainda inscrito |
 
 Usada por: `POST /api/newsletter/subscribe` (§10).
+
+### 1.9 `calendar_context` (nova)
+Contexto por dia (feriados, eventos, promoções planejadas, dias de pagamento) usado como
+feature pelo forecast baseado em LightGBM (`GET /api/sales/forecast-ml`, ver
+`app/ml/forecaster.py`). Sem linha pra uma data, o serviço usa defaults neutros (sem
+feriado/evento/desconto) — ver `docs/miss_atribu.md`.
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `date` | `date` PK | |
+| `is_payday` | `boolean` not null default `false` | |
+| `is_end_of_month` | `boolean` not null default `false` | |
+| `days_until_holiday` | `integer` not null default `99` | dias até o próximo feriado cadastrado |
+| `discount_rate` | `numeric(4,3)` not null default `0` | check `0..1`, promoção planejada pra esse dia |
+| `is_holiday` | `boolean` not null default `false` | |
+| `has_event` | `boolean` not null default `false` | evento pontual (ex.: Black Friday) |
+| `created_at` | `timestamptz` default `now()` | |
+
+Lida por `GET /api/sales/forecast-ml`. Populada em massa por
+`import_data/09_calendar_context.sql`, e dia a dia por
+`GET|POST /api/sales/calendar-context` / `DELETE /api/sales/calendar-context/{date}`
+(admin-only) — o `POST` só aceita `date`/`discount_rate`/`has_event` como input; as demais
+colunas são calculadas a partir da data por `app/ml/calendar.py::derive_calendar_fields`
+(ver `docs/miss_atribu.md` §1).
+
+Importante: `calendar_context.discount_rate` é um **sinal de contexto pro forecast**, não
+um desconto real aplicado a produtos — é uma pendência separada de `discounts` (§1.10)
+abaixo. As duas coisas não são acopladas automaticamente hoje.
+
+### 1.10 `discounts` (nova)
+Descontos reais que mudam o preço exibido/cobrado de produtos — não confundir com
+`calendar_context.discount_rate` (§1.9), que só alimenta o forecast. Cobre `Discount`
+(admin) e os campos `discount_percent`/`discounted_price` em `Product`.
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `id` | `uuid` PK default `uuid_generate_v4()` | |
+| `scope` | `text` not null | check `in ('all','category','product')` |
+| `category` | `text` | obrigatório (e só permitido) quando `scope = 'category'` |
+| `product_id` | `uuid` references `products(id)` on delete cascade | obrigatório (e só permitido) quando `scope = 'product'` |
+| `percentage` | `numeric(5,2)` not null | check `> 0 and <= 100` |
+| `start_date` | `date` not null | |
+| `end_date` | `date` | null = desconto de um dia só (só vale em `start_date`) |
+| `created_at` | `timestamptz` default `now()` | |
+
+Resolução do desconto efetivo de um produto (`app/services/discounts.py::resolve_discount_for_product`):
+mais específico vence — `product` > `category` > `all`; empate na mesma especificidade
+resolve pra maior porcentagem. `GET|POST /api/products*` (leitura pública) e
+`create_order` computam isso a cada request a partir de todos os descontos ativos na
+data corrente — não há cache, tabela é pequena e admin-curada.
+
+Usada por: `GET|POST /api/discounts`, `DELETE /api/discounts/{id}` (admin-only) — CRUD puro,
+sem lógica de resolução aí (isso vive nos consumidores: produtos e pedidos).
+
+**Se seu banco já tem o schema base aplicado** (profiles/products/orders/etc já existem),
+não re-rode o bloco `## 2. SQL completo` abaixo pra pegar `discounts`/`chat_reports`/
+`order_items.original_price` — `create policy` não tem `IF NOT EXISTS` no Postgres, então
+o `## 2` inteiro falha e faz rollback no primeiro `create policy` que já existe (ex.:
+`profiles_select_own_or_admin`), antes de chegar nas tabelas novas. Use
+`docs/migration_discounts_and_reports.sql` em vez disso — só as três coisas novas,
+idempotente de verdade (`drop policy if exists` antes de cada `create policy`).
+
+### 1.11 `calendar_events` (nova)
+Eventos nomeados numa data — diferente de `calendar_context.has_event` (§1.9), que é só
+um boolean sem identidade. Uma data pode ter **vários** eventos (ex.: "Instagram
+Campaign" e "Email blast" no mesmo dia 20/08); `calendar_context` continua tendo no
+máximo uma linha por data.
+
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `id` | `uuid` PK default `uuid_generate_v4()` | |
+| `date` | `date` not null | sem FK pra `calendar_context` — a linha de contexto pode nem existir ainda pra essa data |
+| `name` | `text` not null | ex.: "Instagram Campaign" |
+| `description` | `text` | opcional |
+| `created_at` | `timestamptz` default `now()` | |
+
+`app/services/calendar_events.py::create_event` insere o evento e **garante**
+`calendar_context.has_event = true` pra essa data (upsert, preservando `discount_rate`
+existente) — assim o forecast baseado em LightGBM já enxerga o evento no próximo
+`GET /api/sales/forecast-ml`. É **uma via só**: deletar todos os eventos de uma data
+não volta `has_event` pra `false` automaticamente (um boolean só não dá pra saber se foi
+setado por um evento ou pelo admin direto via `POST /api/sales/calendar-context`) —
+se precisar desmarcar, edite a data direto na seção de calendário do Planning.
+
+Usada por: `GET|POST /api/sales/calendar-events`, `DELETE /api/sales/calendar-events/{id}`
+(admin-only). SQL incremental: `docs/migration_calendar_events.sql`.
 
 ---
 
@@ -215,8 +341,13 @@ create table if not exists public.order_items (
   product_id uuid references public.products(id) on delete set null,
   name text not null,
   price numeric(10, 2) not null check (price >= 0),
+  original_price numeric(10, 2) check (original_price >= 0),
   quantity integer not null check (quantity > 0)
 );
+
+-- Safe on an existing table too — `create table if not exists` above won't add
+-- this column to a table that already exists from before discounts shipped.
+alter table public.order_items add column if not exists original_price numeric(10, 2) check (original_price >= 0);
 
 create index if not exists idx_order_items_order_id on public.order_items (order_id);
 
@@ -277,6 +408,15 @@ create table if not exists public.chat_messages (
 
 create index if not exists idx_chat_messages_conversation_id on public.chat_messages (conversation_id);
 
+create table if not exists public.chat_reports (
+  id uuid primary key default uuid_generate_v4(),
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  reason text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_chat_reports_conversation_id on public.chat_reports (conversation_id);
+
 -- ------------------------------------------------------------
 -- NEWSLETTER
 -- ------------------------------------------------------------
@@ -286,6 +426,42 @@ create table if not exists public.newsletter_subscribers (
   subscribed_at timestamptz not null default now(),
   unsubscribed_at timestamptz
 );
+
+-- ------------------------------------------------------------
+-- CALENDAR CONTEXT (feeds the LightGBM sales forecast)
+-- ------------------------------------------------------------
+create table if not exists public.calendar_context (
+  date date primary key,
+  is_payday boolean not null default false,
+  is_end_of_month boolean not null default false,
+  days_until_holiday integer not null default 99,
+  discount_rate numeric(4, 3) not null default 0 check (discount_rate >= 0 and discount_rate <= 1),
+  is_holiday boolean not null default false,
+  has_event boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-- ------------------------------------------------------------
+-- DISCOUNTS (real product/category/store-wide price discounts)
+-- ------------------------------------------------------------
+create table if not exists public.discounts (
+  id uuid primary key default uuid_generate_v4(),
+  scope text not null check (scope in ('all', 'category', 'product')),
+  category text,
+  product_id uuid references public.products(id) on delete cascade,
+  percentage numeric(5, 2) not null check (percentage > 0 and percentage <= 100),
+  start_date date not null,
+  end_date date,
+  created_at timestamptz not null default now(),
+  check (end_date is null or end_date >= start_date),
+  check (
+    (scope = 'all' and category is null and product_id is null)
+    or (scope = 'category' and category is not null and product_id is null)
+    or (scope = 'product' and product_id is not null and category is null)
+  )
+);
+
+create index if not exists idx_discounts_scope on public.discounts (scope);
 
 -- ------------------------------------------------------------
 -- ROW LEVEL SECURITY
@@ -298,6 +474,9 @@ alter table public.sales enable row level security;
 alter table public.conversations enable row level security;
 alter table public.chat_messages enable row level security;
 alter table public.newsletter_subscribers enable row level security;
+alter table public.calendar_context enable row level security;
+alter table public.chat_reports enable row level security;
+alter table public.discounts enable row level security;
 
 create or replace function public.is_admin()
 returns boolean as $$
@@ -373,11 +552,36 @@ create policy "chat_messages_insert_via_conversation" on public.chat_messages
     )
   );
 
+-- Chat reports: customer can report their own conversation, only admin can list reports
+create policy "chat_reports_insert_via_conversation" on public.chat_reports
+  for insert with check (
+    exists (
+      select 1 from public.conversations c
+      where c.id = conversation_id and (c.customer_id = auth.uid() or public.is_admin())
+    )
+  );
+create policy "chat_reports_admin_read" on public.chat_reports
+  for select using (public.is_admin());
+
 -- Newsletter: anyone can subscribe, only admin can list subscribers
 create policy "newsletter_public_insert" on public.newsletter_subscribers
   for insert with check (true);
 create policy "newsletter_admin_read" on public.newsletter_subscribers
   for select using (public.is_admin());
+
+-- Calendar context: admin-only in both directions (feeds the forecast, no public read)
+create policy "calendar_context_admin_read" on public.calendar_context
+  for select using (public.is_admin());
+create policy "calendar_context_admin_write" on public.calendar_context
+  for all using (public.is_admin()) with check (public.is_admin());
+
+-- Discounts: admin-only in both directions — resolved server-side (service-role,
+-- bypasses RLS) into discount_percent/discounted_price on GET /api/products*, so
+-- there's no need for public read access to this table directly.
+create policy "discounts_admin_read" on public.discounts
+  for select using (public.is_admin());
+create policy "discounts_admin_write" on public.discounts
+  for all using (public.is_admin()) with check (public.is_admin());
 
 -- ------------------------------------------------------------
 -- SEED DATA
