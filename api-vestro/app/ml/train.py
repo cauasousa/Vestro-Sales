@@ -8,7 +8,7 @@ Needs a real stretch of daily history in `sales` (months, not the handful of see
 import_data/05_sales.sql) and, ideally, matching rows in `calendar_context` for the same
 date range — with that table missing/empty, every day's contextual features (is_payday,
 is_holiday, discount_rate, ...) fall back to defaults, so the model can only learn the
-day-of-week / rolling-mean pattern. See docs/miss_atribu.md for both.
+day-of-week / rolling-mean pattern. See docs/machine-learning.md for both.
 
 After a successful run, restart the API — `forecaster.load_model()` is process-cached, so
 a training run in a separate process doesn't refresh an already-running server.
@@ -53,7 +53,7 @@ def _build_training_frame(supabase) -> tuple[pd.DataFrame, pd.Series]:
         raise ValueError(
             f"Only {len(daily_totals)} day(s) of sales history found — need at least "
             f"{MIN_TRAINING_DAYS} before training produces anything useful. "
-            "See docs/miss_atribu.md."
+            "See docs/machine-learning.md."
         )
 
     context_rows = supabase.table("calendar_context").select("*").execute().data or []

@@ -28,7 +28,7 @@ class SalesRetrainResponse(BaseModel):
 
 class CalendarContextIn(BaseModel):
     """The two calendar_context fields that are actually business decisions —
-    nothing else here is admin input, see docs/miss_atribu.md §1."""
+    nothing else here is admin input, see docs/machine-learning.md."""
 
     date: dt.date
     discount_rate: float = Field(0, ge=0, le=1, description="Planned promotion for this day, 0-1")

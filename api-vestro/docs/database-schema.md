@@ -1,61 +1,47 @@
 # Database Schema — Vestro Sales (Supabase)
 
-Especificação de **todas as tabelas necessárias** para tirar o projeto do mock/localStorage, com base nas rotas listadas em `docs/api-requirements.md` e na estrutura já iniciada em `schema.sql` / `docs/database-cmd.text`. Este arquivo resolve as pendências de modelagem apontadas em `api-requirements.md §12` e traz o SQL pronto pra rodar no Supabase SQL Editor.
+Reference for every table backing the API — columns, relationships, RLS policies, and the full runnable SQL (§2). Reflects the schema as currently deployed; incremental changes since the initial version ship as standalone files in `import_data/migration_*.sql`, called out inline below where relevant.
 
-## 0. Decisões tomadas (resolvendo `api-requirements.md §12`)
-
-| Pendência | Decisão |
-|---|---|
-| Nomes de role divergentes (`manager/client` vs `admin/customer`) | Padronizar em **`admin` \| `customer`** — é o que `schema.sql`, `database-cmd.text` e a função `is_admin()` já usam. **Ação no front**: `src/types/user.ts` (`Role`), `useAuthMock.ts` e as páginas admin usam hoje `'manager' \| 'client'` e precisam ser renomeados para bater com o banco. |
-| Pedidos: só existia `sales` (1 linha por item vendido) | Criar **`orders`** (o pedido) + **`order_items`** (os itens). `sales` é mantida como ledger de receita para o gráfico de forecast, populada automaticamente por trigger a partir de `order_items` — nenhuma rota escreve nela manualmente. |
-| Chat: `chat_messages` original era 1 pergunta + 1 `ai_response`, mas o admin chat implementado é uma conversa bidirecional (admin ↔ cliente) | Trocar por **`conversations`** + **`chat_messages`** (redesenhada, sem coluna `ai_response`). O AI Assistant (`/api/ai/assistant`) é stateless hoje — não persiste histórico, então não precisa de tabela própria por enquanto. |
-| Newsletter (rota `POST /api/newsletter/subscribe` em `api-requirements.md §10`) não tinha tabela | Criar **`newsletter_subscribers`**. |
-
----
-
-## 1. Tabelas
+## 1. Tables
 
 ### 1.1 `profiles`
-Estende `auth.users` do Supabase Auth com o `role` da aplicação. Já existe em `schema.sql`, mantida como está.
+Extends Supabase Auth's `auth.users` with the application's `role`.
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | = `auth.users.id` |
 | `email` | `text` not null | |
 | `full_name` | `text` | |
 | `role` | `text` not null default `'customer'` | check `in ('admin','customer')` |
-| `accepts_marketing` | `boolean` not null default `false` | **novo** — consentimento pra receber email de marketing/evento, capturado no checkbox de `POST /api/auth/register`. `handle_new_user` sempre insere `false`; `register()` faz um `update` logo em seguida só quando o checkbox foi marcado (nada a fazer no caso `false`, já é o default). |
+| `accepts_marketing` | `boolean` not null default `false` | Marketing/event email consent, captured by the checkbox on `POST /api/auth/register`. `handle_new_user` always inserts `false`; `register()` issues a follow-up `update` only when the checkbox was checked (nothing to do for `false`, it's already the default). |
 | `created_at` | `timestamptz` default `now()` | |
 
-Populada automaticamente pelo trigger `handle_new_user` em todo signup. Usada por: `GET /api/auth/me`, `GET /api/users`, checagem de admin em todas as rotas protegidas, e `GET /api/marketing/opted-in-count` / `POST /api/marketing/send` (filtro `accepts_marketing = true`). SQL incremental: `docs/migration_marketing_email.sql`.
+Populated automatically by the `handle_new_user` trigger on every signup. Used by: `GET /api/auth/me`, `GET /api/users`, admin checks on every protected route, and `GET /api/marketing/opted-in-count` / `POST /api/marketing/send` (filtered on `accepts_marketing = true`). Incremental SQL: `docs/migration_marketing_email.sql`.
 
 ### 1.2 `products`
-Já existe em `schema.sql`, mantida como está — cobre `Product` (`src/types/product.ts`).
+Backs `Product` (`src/types/product.ts`).
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `name` | `text` not null | |
 | `description` | `text` | |
-| `category` | `text` not null default `'accessories'` | ver constraint abaixo — bate com `ProductCategory` do front |
+| `category` | `text` not null default `'accessories'` | see constraint below — matches the frontend's `ProductCategory` |
 | `price` | `numeric(10,2)` not null | check `>= 0` |
 | `stock` | `integer` not null default `0` | check `>= 0` |
 | `image_url` | `text` | |
 | `is_active` | `boolean` not null default `true` | |
-| `created_at` / `updated_at` | `timestamptz` | `updated_at` mantido por trigger `set_updated_at` |
+| `created_at` / `updated_at` | `timestamptz` | `updated_at` kept current by the `set_updated_at` trigger |
 
-Usada por: todas as rotas `/api/products*` (§4 de `api-requirements.md`). As respostas de
-`GET /api/products` e `GET /api/products/{id}` agora incluem `discount_percent` e
-`discounted_price` (não-persistidos, calculados on-the-fly a partir de `discounts`, §1.10)
-— `null` quando não há desconto ativo pro produto.
+Used by every `/api/products*` route. Responses from `GET /api/products` and `GET /api/products/{id}` also include `discount_percent` and `discounted_price` (not persisted — computed on the fly from `discounts`, §1.10) — `null` when no discount is active for the product.
 
-### 1.3 `orders` (nova)
-O pedido em si — cabeçalho com dados de entrega e status. Cobre `Order['customer']` (`src/types/cart.ts`).
+### 1.3 `orders`
+The order itself — header with shipping details and status. Backs `Order['customer']` (`src/types/cart.ts`).
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
-| `customer_id` | `uuid` references `profiles(id)` on delete set null | **nullable** — checkout hoje não exige login (guest checkout) |
+| `customer_id` | `uuid` references `profiles(id)` on delete set null | **nullable** — checkout doesn't require login today (guest checkout) |
 | `full_name` | `text` not null | |
 | `email` | `text` not null | |
 | `address` | `text` not null | |
@@ -65,196 +51,147 @@ O pedido em si — cabeçalho com dados de entrega e status. Cobre `Order['custo
 | `status` | `text` not null default `'placed'` | check `in ('placed','paid','shipped','delivered','cancelled')` |
 | `created_at` | `timestamptz` default `now()` | |
 
-Usada por: `POST /api/orders`, `GET /api/orders/:id`, `GET /api/orders` (§5).
+Used by `POST /api/orders`, `GET /api/orders/:id`, `GET /api/orders`.
 
-### 1.4 `order_items` (nova)
-Os itens de um pedido. Cobre `CartItem` (`src/types/cart.ts`) — guarda `name`/`price` como **snapshot** no momento da compra (não referencia o preço atual do produto, que pode mudar depois).
+### 1.4 `order_items`
+The line items of an order. Backs `CartItem` (`src/types/cart.ts`) — stores `name`/`price` as a **snapshot** at purchase time (doesn't reference the product's current price, which may change later).
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `order_id` | `uuid` references `orders(id)` on delete cascade | |
 | `product_id` | `uuid` references `products(id)` on delete set null | |
-| `name` | `text` not null | snapshot do nome |
-| `price` | `numeric(10,2)` not null | snapshot do preço **já com desconto aplicado** (o preço cobrado), check `>= 0` |
-| `original_price` | `numeric(10,2)` | **novo** — snapshot do preço sem desconto, só preenchido quando um desconto estava ativo pro produto no momento da compra; null = sem desconto |
+| `name` | `text` not null | name snapshot |
+| `price` | `numeric(10,2)` not null | price snapshot **with any discount already applied** (the price actually charged), check `>= 0` |
+| `original_price` | `numeric(10,2)` | Pre-discount price snapshot, only populated when a discount was active for the product at purchase time; null = no discount |
 | `quantity` | `integer` not null | check `> 0` |
 
-`price`/`original_price` são recalculados no backend a partir do produto + descontos ativos em `create_order` (`app/services/orders.py::_resolve_item_price`) — o preço enviado pelo cliente no `POST /api/orders` nunca é usado diretamente pro valor cobrado, só como fallback se o produto tiver sido removido entre o carrinho e o checkout.
+`price`/`original_price` are recomputed server-side from the product plus any active discounts inside `create_order` (`app/services/orders.py::_resolve_item_price`) — the price the client sends in `POST /api/orders` is never used directly for the charged amount, only as a fallback if the product was removed between cart and checkout.
 
-### 1.5 `sales` (mantida, agora derivada)
-Ledger de receita usado só para o gráfico de forecast (`SalesForecastPoint`, `GET /api/sales/forecast`, §7). Já existe em `schema.sql`; ganha uma FK pra `orders` e passa a ser preenchida **automaticamente** por trigger a cada `order_items` inserido — nenhuma rota grava nela direto.
+### 1.5 `sales` (derived)
+Revenue ledger used only for the forecast chart (`SalesForecastPoint`, `GET /api/sales/forecast`). Has an FK to `orders` and is populated **automatically** by a trigger on every `order_items` insert — no route writes to it directly.
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
-| `order_id` | `uuid` references `orders(id)` on delete cascade | **novo** |
+| `order_id` | `uuid` references `orders(id)` on delete cascade | |
 | `product_id` | `uuid` references `products(id)` on delete set null | |
 | `customer_id` | `uuid` references `profiles(id)` on delete set null | |
 | `quantity` | `integer` not null | check `> 0` |
 | `total_amount` | `numeric(10,2)` not null | check `>= 0` |
 | `created_at` | `timestamptz` default `now()` | |
 
-### 1.6 `conversations` (nova)
-Uma thread de suporte por cliente. Cobre `Conversation` (`src/lib/chat-store.ts`).
+### 1.6 `conversations`
+One support thread per customer. Backs `Conversation` (`src/lib/chat-store.ts`).
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `customer_id` | `uuid` references `profiles(id)` on delete cascade | |
-| `customer_name` | `text` not null | snapshot, evita join só pra exibir nome na lista |
+| `customer_name` | `text` not null | snapshot, avoids a join just to show the name in the list |
 | `created_at` | `timestamptz` default `now()` | |
 
-Usada por: `GET /api/chat/conversations`, `GET /api/chat/conversations/:customerId` (§8). O
-`id` agora é exposto no schema `Conversation` do backend (antes só `customerId`) — necessário
-pro frontend se inscrever em `chat_messages` via Supabase Realtime filtrado por
-`conversation_id` (ver `docs/miss_atribu.md`-style nota em §8 sobre real-time).
+Used by `GET /api/chat/conversations`, `GET /api/chat/conversations/:customerId`. The `id` is exposed in the backend's `Conversation` schema (previously only `customerId`) — needed for the frontend to subscribe to `chat_messages` via Supabase Realtime, filtered by `conversation_id`.
 
-### 1.7 `chat_messages` (redesenhada)
-Mensagens dentro de uma conversa. Substitui a versão antiga (1 pergunta + 1 `ai_response`). Cobre `ChatMessage` (`src/lib/chat-store.ts`).
+### 1.7 `chat_messages`
+Messages within a conversation. Replaces an earlier version (1 question + 1 `ai_response`). Backs `ChatMessage` (`src/lib/chat-store.ts`).
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `conversation_id` | `uuid` references `conversations(id)` on delete cascade | |
 | `sender` | `text` not null | check `in ('admin','customer')` |
 | `text` | `text` not null | |
-| `order_id` | `uuid` references `orders(id)` on delete set null | **novo** — opcional, preenchido quando a mensagem parte do botão "Contact us about this order"; renderizado como um chip clicável tanto pro admin quanto pro cliente. Sem policy de RLS própria — segue a mesma linha (RLS de `chat_messages` já cobre). |
+| `order_id` | `uuid` references `orders(id)` on delete set null | Optional, set when the message originates from the "Contact us about this order" button; rendered as a clickable chip for both admin and customer. No RLS policy of its own — covered by `chat_messages`'s existing policies. |
 | `created_at` | `timestamptz` default `now()` | |
 
-Usada por: `POST /api/chat/conversations/:customerId/messages` (§8). As policies de RLS
-existentes (owner-or-admin) já são suficientes pro Supabase Realtime — o frontend se
-autentica com o JWT do usuário antes de assinar o channel, então o Realtime aplica as
-mesmas policies que a leitura via REST.
+Used by `POST /api/chat/conversations/:customerId/messages`. The existing RLS policies (owner-or-admin) are already sufficient for Supabase Realtime — the frontend authenticates with the user's JWT before subscribing to the channel, so Realtime enforces the same policies as REST reads.
 
-SQL incremental: `docs/migration_chat_order_link.sql` (mesmo padrão idempotente de
-`migration_discounts_and_reports.sql` — `add column if not exists`, não precisa re-rodar
-o `## 2` inteiro).
+Incremental SQL: `docs/migration_chat_order_link.sql` (same idempotent pattern as `migration_discounts_and_reports.sql` — `add column if not exists`, no need to re-run all of `## 2`).
 
-**Pendência separada, fácil de esquecer:** RLS não é suficiente pra `postgres_changes`
-disparar — a tabela também precisa estar na publication `supabase_realtime` (Database >
-Replication no painel do Supabase, ou `alter publication supabase_realtime add table
-public.chat_messages`). Sem isso o channel conecta normalmente (`status: SUBSCRIBED`) mas
-nunca recebe evento nenhum, silenciosamente — não dá erro em lugar nenhum. SQL incremental:
-`docs/migration_realtime_chat.sql`.
+**Easy-to-miss, separate gotcha:** RLS alone isn't enough for `postgres_changes` to fire — the table also needs to be in the `supabase_realtime` publication (Database > Replication in the Supabase dashboard, or `alter publication supabase_realtime add table public.chat_messages`). Without this the channel connects normally (`status: SUBSCRIBED`) but silently never receives an event — no error anywhere. Incremental SQL: `import_data/migration_realtime_chat.sql`.
 
-### 1.7.1 `chat_reports` (nova)
-Denúncia de uma conversa pelo cliente (botão "Report" no chat). Uma linha por denúncia —
-uma conversa pode ter mais de uma se o cliente reportar de novo.
+### 1.7.1 `chat_reports`
+A customer reporting a conversation (the "Report" button in chat). One row per report — a conversation can have more than one if the customer reports again.
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `conversation_id` | `uuid` references `conversations(id)` on delete cascade | |
-| `reason` | `text` | opcional, texto livre |
+| `reason` | `text` | optional free text |
 | `created_at` | `timestamptz` default `now()` | |
 
-Usada por: `POST /api/chat/conversations/:customerId/report`. O admin vê um badge
-"Reported" na lista de conversas (`Conversation.reported`, calculado a partir de qualquer
-linha existente pra aquela `conversation_id`).
+Used by `POST /api/chat/conversations/:customerId/report`. The admin sees a "Reported" badge in the conversation list (`Conversation.reported`, computed from any existing row for that `conversation_id`).
 
-### 1.8 `newsletter_subscribers` (nova)
+### 1.8 `newsletter_subscribers`
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `email` | `text` not null unique | |
 | `subscribed_at` | `timestamptz` default `now()` | |
-| `unsubscribed_at` | `timestamptz` | null = ainda inscrito |
+| `unsubscribed_at` | `timestamptz` | null = still subscribed |
 
-Usada por: `POST /api/newsletter/subscribe` (§10).
+Used by `POST /api/newsletter/subscribe`.
 
-### 1.9 `calendar_context` (nova)
-Contexto por dia (feriados, eventos, promoções planejadas, dias de pagamento) usado como
-feature pelo forecast baseado em LightGBM (`GET /api/sales/forecast-ml`, ver
-`app/ml/forecaster.py`). Sem linha pra uma data, o serviço usa defaults neutros (sem
-feriado/evento/desconto) — ver `docs/miss_atribu.md`.
+### 1.9 `calendar_context`
+Per-day context (holidays, events, planned promotions, paydays) used as a feature by the LightGBM-based forecast (`GET /api/sales/forecast-ml`, see `app/ml/forecaster.py`). With no row for a given date, the service falls back to neutral defaults (no holiday/event/discount) — see [`docs/machine-learning.md`](machine-learning.md).
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `date` | `date` PK | |
 | `is_payday` | `boolean` not null default `false` | |
 | `is_end_of_month` | `boolean` not null default `false` | |
-| `days_until_holiday` | `integer` not null default `99` | dias até o próximo feriado cadastrado |
-| `discount_rate` | `numeric(4,3)` not null default `0` | check `0..1`, promoção planejada pra esse dia |
+| `days_until_holiday` | `integer` not null default `99` | days until the next registered holiday |
+| `discount_rate` | `numeric(4,3)` not null default `0` | check `0..1`, a promotion planned for that day |
 | `is_holiday` | `boolean` not null default `false` | |
-| `has_event` | `boolean` not null default `false` | evento pontual (ex.: Black Friday) |
+| `has_event` | `boolean` not null default `false` | a one-off event (e.g. Black Friday) |
 | `created_at` | `timestamptz` default `now()` | |
 
-Lida por `GET /api/sales/forecast-ml`. Populada em massa por
-`import_data/09_calendar_context.sql`, e dia a dia por
-`GET|POST /api/sales/calendar-context` / `DELETE /api/sales/calendar-context/{date}`
-(admin-only) — o `POST` só aceita `date`/`discount_rate`/`has_event` como input; as demais
-colunas são calculadas a partir da data por `app/ml/calendar.py::derive_calendar_fields`
-(ver `docs/miss_atribu.md` §1).
+Read by `GET /api/sales/forecast-ml`. Bulk-populated by `import_data/09_calendar_context.sql`, and maintained day by day via `GET|POST /api/sales/calendar-context` / `DELETE /api/sales/calendar-context/{date}` (admin-only) — `POST` only accepts `date`/`discount_rate`/`has_event` as input; the remaining columns are derived from the date by `app/ml/calendar.py::derive_calendar_fields` (see [`docs/machine-learning.md`](machine-learning.md)).
 
-Importante: `calendar_context.discount_rate` é um **sinal de contexto pro forecast**, não
-um desconto real aplicado a produtos — é uma pendência separada de `discounts` (§1.10)
-abaixo. As duas coisas não são acopladas automaticamente hoje.
+Important: `calendar_context.discount_rate` is a **forecast context signal**, not a real discount applied to products — that's the separate `discounts` table (§1.10) below. The two aren't automatically linked today.
 
-### 1.10 `discounts` (nova)
-Descontos reais que mudam o preço exibido/cobrado de produtos — não confundir com
-`calendar_context.discount_rate` (§1.9), que só alimenta o forecast. Cobre `Discount`
-(admin) e os campos `discount_percent`/`discounted_price` em `Product`.
+### 1.10 `discounts`
+Real discounts that change a product's displayed/charged price — not to be confused with `calendar_context.discount_rate` (§1.9), which only feeds the forecast. Backs the admin `Discount` type and the `discount_percent`/`discounted_price` fields on `Product`.
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
 | `scope` | `text` not null | check `in ('all','category','product')` |
-| `category` | `text` | obrigatório (e só permitido) quando `scope = 'category'` |
-| `product_id` | `uuid` references `products(id)` on delete cascade | obrigatório (e só permitido) quando `scope = 'product'` |
+| `category` | `text` | required (and only allowed) when `scope = 'category'` |
+| `product_id` | `uuid` references `products(id)` on delete cascade | required (and only allowed) when `scope = 'product'` |
 | `percentage` | `numeric(5,2)` not null | check `> 0 and <= 100` |
 | `start_date` | `date` not null | |
-| `end_date` | `date` | null = desconto de um dia só (só vale em `start_date`) |
+| `end_date` | `date` | null = a single-day discount (only valid on `start_date`) |
 | `created_at` | `timestamptz` default `now()` | |
 
-Resolução do desconto efetivo de um produto (`app/services/discounts.py::resolve_discount_for_product`):
-mais específico vence — `product` > `category` > `all`; empate na mesma especificidade
-resolve pra maior porcentagem. `GET|POST /api/products*` (leitura pública) e
-`create_order` computam isso a cada request a partir de todos os descontos ativos na
-data corrente — não há cache, tabela é pequena e admin-curada.
+Resolving a product's effective discount (`app/services/discounts.py::resolve_discount_for_product`): the most specific wins — `product` > `category` > `all`; ties at the same specificity resolve to the higher percentage. `GET|POST /api/products*` (public reads) and `create_order` compute this on every request from all discounts active on the current date — no caching, the table is small and admin-curated.
 
-Usada por: `GET|POST /api/discounts`, `DELETE /api/discounts/{id}` (admin-only) — CRUD puro,
-sem lógica de resolução aí (isso vive nos consumidores: produtos e pedidos).
+Used by `GET|POST /api/discounts`, `DELETE /api/discounts/{id}` (admin-only) — plain CRUD, the resolution logic lives in the consumers (products and orders), not here.
 
-**Se seu banco já tem o schema base aplicado** (profiles/products/orders/etc já existem),
-não re-rode o bloco `## 2. SQL completo` abaixo pra pegar `discounts`/`chat_reports`/
-`order_items.original_price` — `create policy` não tem `IF NOT EXISTS` no Postgres, então
-o `## 2` inteiro falha e faz rollback no primeiro `create policy` que já existe (ex.:
-`profiles_select_own_or_admin`), antes de chegar nas tabelas novas. Use
-`docs/migration_discounts_and_reports.sql` em vez disso — só as três coisas novas,
-idempotente de verdade (`drop policy if exists` antes de cada `create policy`).
+**If your database already has the base schema applied** (profiles/products/orders/etc already exist), don't re-run the `## 2. Full SQL` block below just to pick up `discounts`/`chat_reports`/`order_items.original_price` — Postgres's `create policy` has no `IF NOT EXISTS`, so the whole `## 2` block fails and rolls back at the first policy that already exists (e.g. `profiles_select_own_or_admin`), before reaching the new tables. Use `docs/migration_discounts_and_reports.sql` instead — just the three new pieces, genuinely idempotent (`drop policy if exists` before each `create policy`).
 
-### 1.11 `calendar_events` (nova)
-Eventos nomeados numa data — diferente de `calendar_context.has_event` (§1.9), que é só
-um boolean sem identidade. Uma data pode ter **vários** eventos (ex.: "Instagram
-Campaign" e "Email blast" no mesmo dia 20/08); `calendar_context` continua tendo no
-máximo uma linha por data.
+### 1.11 `calendar_events`
+Named events on a date — different from `calendar_context.has_event` (§1.9), which is just a boolean with no identity. A date can have **multiple** events (e.g. "Instagram Campaign" and "Email blast" on the same day); `calendar_context` still holds at most one row per date.
 
-| Coluna | Tipo | Notas |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK default `uuid_generate_v4()` | |
-| `date` | `date` not null | sem FK pra `calendar_context` — a linha de contexto pode nem existir ainda pra essa data |
-| `name` | `text` not null | ex.: "Instagram Campaign" |
-| `description` | `text` | opcional |
+| `date` | `date` not null | no FK to `calendar_context` — the context row may not exist yet for that date |
+| `name` | `text` not null | e.g. "Instagram Campaign" |
+| `description` | `text` | optional |
 | `created_at` | `timestamptz` default `now()` | |
 
-`app/services/calendar_events.py::create_event` insere o evento e **garante**
-`calendar_context.has_event = true` pra essa data (upsert, preservando `discount_rate`
-existente) — assim o forecast baseado em LightGBM já enxerga o evento no próximo
-`GET /api/sales/forecast-ml`. É **uma via só**: deletar todos os eventos de uma data
-não volta `has_event` pra `false` automaticamente (um boolean só não dá pra saber se foi
-setado por um evento ou pelo admin direto via `POST /api/sales/calendar-context`) —
-se precisar desmarcar, edite a data direto na seção de calendário do Planning.
+`app/services/calendar_events.py::create_event` inserts the event and **ensures** `calendar_context.has_event = true` for that date (upsert, preserving the existing `discount_rate`) — so the LightGBM forecast already sees the event on the next `GET /api/sales/forecast-ml`. It's **one-directional**: deleting all events for a date doesn't automatically flip `has_event` back to `false` (a single boolean can't tell whether it was set by an event or directly by the admin via `POST /api/sales/calendar-context`) — to unset it, edit the date directly in the Planning calendar.
 
-Usada por: `GET|POST /api/sales/calendar-events`, `DELETE /api/sales/calendar-events/{id}`
-(admin-only). SQL incremental: `docs/migration_calendar_events.sql`.
+Used by `GET|POST /api/sales/calendar-events`, `DELETE /api/sales/calendar-events/{id}` (admin-only). Incremental SQL: `docs/migration_calendar_events.sql`.
 
 ---
 
-## 2. SQL completo (rodar no Supabase SQL Editor)
+## 2. Full SQL (run in the Supabase SQL Editor)
 
-Substitui `schema.sql` inteiro (mesma base, com as tabelas novas e ajustes acima).
+Creates the entire schema from scratch — tables, triggers, RLS, and an initial product seed.
 
 ```sql
 -- ============================================================
@@ -595,19 +532,3 @@ values
   ('Braided USB-C Cable (2m)', 'Durable braided cable, 100W fast charging.', 'accessories', 14.90, 300, null)
 on conflict do nothing;
 ```
-
----
-
-## 3. Diferenças em relação ao `schema.sql` atual
-
-- `products.category` ganhou `check` restringindo aos 6 valores de `ProductCategory` (antes era `text` livre).
-- `sales` ganhou coluna `order_id` e agora é preenchida só via trigger (política de `insert`/`update` direta foi removida — nada deve escrever nela manualmente).
-- `chat_messages` perdeu a coluna `ai_response` e ganhou `conversation_id` + `sender`; nova tabela `conversations` como pai.
-- Novas tabelas: `orders`, `order_items`, `newsletter_subscribers`.
-- `is_admin()` continua igual, mas agora também é referenciada pelas policies de `orders`, `order_items`, `conversations` e `chat_messages`.
-
-## 4. O que precisa mudar no front depois de aplicar isso
-
-- `src/types/user.ts`: `Role = 'admin' | 'customer'` (era `'manager' | 'client'`); atualizar todo lugar que compara `role === 'manager'`/`'client'` (`useAuthMock.ts`, `admin/layout.tsx`, `admin/users/page.tsx`, `register/page.tsx`).
-- `src/types/cart.ts`: `Order` ganha `id` vindo do banco (`uuid`) em vez de `order-${Date.now()...}`, e `status`.
-- `src/lib/product-data.ts`, `orders.ts`, `user-store.ts`, `chat-store.ts`: trocar leitura/escrita de `localStorage` por chamadas às rotas de `api-requirements.md` (ou Supabase client direto, conforme decisão do §12.4 daquele arquivo).

@@ -1,7 +1,7 @@
 import datetime as dt
 
 # Fixed US federal holidays for the years this app has seed/forecast data for. Extend this
-# list by hand as the range of dates the app cares about grows — see docs/miss_atribu.md §1.
+# list by hand as the range of dates the app cares about grows — see docs/machine-learning.md.
 US_HOLIDAYS: list[dt.date] = [
     dt.date(2025, 1, 1), dt.date(2025, 7, 4), dt.date(2025, 11, 27), dt.date(2025, 12, 25),
     dt.date(2026, 1, 1), dt.date(2026, 7, 4), dt.date(2026, 11, 26), dt.date(2026, 12, 25),
@@ -11,7 +11,7 @@ US_HOLIDAYS: list[dt.date] = [
 def derive_calendar_fields(date: dt.date) -> dict:
     """Computes the calendar_context columns that follow mechanically from the date itself
     (payday, end of month, distance to the next known holiday) — kept out of admin input
-    since there's nothing for a human to decide here. See docs/miss_atribu.md §1 for why
+    since there's nothing for a human to decide here. See docs/machine-learning.md for why
     only discount_rate/has_event (CalendarContextIn) are actual business decisions.
     """
     upcoming = [h for h in US_HOLIDAYS if h >= date]

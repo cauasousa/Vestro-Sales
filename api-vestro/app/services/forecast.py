@@ -84,7 +84,7 @@ async def get_ml_forecast() -> SalesMLForecastResponse:
     Each day's prediction feeds back into the next day's `rolling_mean_7d` feature, so the
     horizon is walked forward one day at a time rather than predicted in a single batch.
     Degrades to `model_available: false` (empty forecast) when the model hasn't been
-    trained yet — see docs/miss_atribu.md for what's needed to enable this.
+    trained yet — see docs/machine-learning.md for what's needed to enable this.
     """
     model = forecaster.load_model()
     if model is None:
@@ -115,7 +115,7 @@ async def get_ml_forecast() -> SalesMLForecastResponse:
         )
         context_by_date = {row["date"]: row for row in (context_result.data or [])}
     except Exception:
-        # `calendar_context` doesn't exist yet — see docs/miss_atribu.md.
+        # `calendar_context` doesn't exist yet — see docs/machine-learning.md.
         context_by_date = {}
 
     points = []

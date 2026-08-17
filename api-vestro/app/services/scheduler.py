@@ -20,7 +20,7 @@ async def daily_retrain_loop() -> None:
     If this API ever runs with multiple workers/replicas, every one of them fires this
     loop independently (harmless, just redundant retraining) — move to an external
     scheduler hitting `POST /api/sales/retrain` instead if that becomes a problem. See
-    docs/miss_atribu.md.
+    docs/machine-learning.md.
 
     A failed run (e.g. not enough `sales` history yet) is logged and skipped — it doesn't
     stop the loop from trying again at the next scheduled time.

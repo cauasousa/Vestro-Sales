@@ -33,8 +33,8 @@ def build_features_for_date(
         "day_of_week": target_date.weekday(),
         "is_weekend": 1 if target_date.weekday() >= 5 else 0,
         "rolling_mean_7d": rolling_7d,
-        # Contextual variables coming from `calendar_context` — see docs/miss_atribu.md
-        # for the table this table is expected to provide.
+        # Contextual variables coming from `calendar_context` — see docs/machine-learning.md
+        # for the fields this table is expected to provide.
         "is_payday": context_data.get("is_payday", 0),
         "is_end_of_month": context_data.get("is_end_of_month", 0),
         "days_until_holiday": context_data.get("days_until_holiday", 99),
@@ -49,7 +49,7 @@ def build_features_for_date(
 def load_model() -> lgb.LGBMRegressor | None:
     """Loads the trained model from disk, or None if it hasn't been trained yet.
 
-    No model file ships with the repo — see docs/miss_atribu.md for what's needed
+    No model file ships with the repo — see docs/machine-learning.md for what's needed
     to train one. Callers must treat `None` as "forecast unavailable", not an error.
     """
     path = Path(get_settings().sales_model_path)
